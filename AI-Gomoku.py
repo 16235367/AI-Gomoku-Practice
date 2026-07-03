@@ -1,32 +1,39 @@
 import tkinter as tk
 from tkinter import messagebox
 import math
+import copy
 
 
 # ==========================================
-# 模块1：核心逻辑模块 (3D 空间状态与 26方向规则引擎)
+# 模块1：核心逻辑模块 (15x15x15, 融解与凝固规则引擎)
 # ==========================================
 class Gomoku3DBoard:
-    def __init__(self, size=10):
+    def __init__(self, size=15):
         self.size = size
+        # grid状态: 0=空, 1=黑, -1=白, 2=凝固的废棋
         self.grid = [[[0] * size for _ in range(size)] for _ in range(size)]
         self.history = []
+        self.scores = {1: 0, -1: 0}  # 双方得分
 
     def place_piece(self, x, y, z, player):
         if self.grid[z][y][x] == 0:
+            # 深拷贝保存历史，以便完美撤销因为融解和凝固而改变的地形
+            self.history.append((copy.deepcopy(self.grid), self.scores.copy()))
             self.grid[z][y][x] = player
-            self.history.append((x, y, z))
+            self._process_chains(x, y, z)
             return True
         return False
 
     def undo_move(self):
         if self.history:
-            x, y, z = self.history.pop()
-            self.grid[z][y][x] = 0
+            last_grid, last_scores = self.history.pop()
+            self.grid = last_grid
+            self.scores = last_scores
             return True
         return False
 
-    def check_win(self, x, y, z, player):
+    def _process_chains(self, x, y, z):
+        """核心：扫描 13 个轴向的 5 子链，触发凝固或融解"""
         directions = [
             (1, 0, 0), (0, 1, 0), (0, 0, 1),
             (1, 1, 0), (1, -1, 0), (1, 0, 1), (1, 0, -1), (0, 1, 1), (0, 1, -1),
@@ -34,28 +41,57 @@ class Gomoku3DBoard:
         ]
 
         for dx, dy, dz in directions:
-            count = 1
-            nx, ny, nz = x + dx, y + dy, z + dz
-            while 0 <= nx < self.size and 0 <= ny < self.size and 0 <= nz < self.size and self.grid[nz][ny][
-                nx] == player:
-                count += 1
-                nx, ny, nz = nx + dx, ny + dy, nz + dz
-            nx, ny, nz = x - dx, y - dy, z - dz
-            while 0 <= nx < self.size and 0 <= ny < self.size and 0 <= nz < self.size and self.grid[nz][ny][
-                nx] == player:
-                count += 1
-                nx, ny, nz = nx - dx, ny - dy, nz - dz
+            # 寻找包含落子点 (x,y,z) 的所有 5 个长度的线段起点
+            for offset in range(-4, 1):
+                chain = []
+                valid = True
+                for i in range(5):
+                    nx = x + dx * (offset + i)
+                    ny = y + dy * (offset + i)
+                    nz = z + dz * (offset + i)
 
-            if count >= 5:
-                return True
-        return False
+                    if 0 <= nx < self.size and 0 <= ny < self.size and 0 <= nz < self.size:
+                        state = self.grid[nz][ny][nx]
+                        # 只有正常的黑白棋子能参与计算，空位(0)或废棋(2)会打断链条
+                        if state in [1, -1]:
+                            chain.append((nx, ny, nz, state))
+                        else:
+                            valid = False
+                            break
+                    else:
+                        valid = False
+                        break
+
+                # 如果发现一条完整的 5 子链
+                if valid and len(chain) == 5:
+                    c_black = sum(1 for _, _, _, s in chain if s == 1)
+                    c_white = sum(1 for _, _, _, s in chain if s == -1)
+
+                    if c_black == 5 or c_white == 5:
+                        # 纯色连五 -> 凝固成废棋 (状态 2)
+                        for cx, cy, cz, _ in chain:
+                            self.grid[cz][cy][cx] = 2
+                    elif c_black + c_white == 5:
+                        # 混合颜色连五 -> 融解得分！
+                        majority = 1 if c_black > c_white else -1
+                        self.scores[majority] += 1
+                        # 从棋盘上彻底消除这五颗子 (腾出空间)
+                        for cx, cy, cz, _ in chain:
+                            self.grid[cz][cy][cx] = 0
+
+    def check_win(self):
+        """胜负判定：先达到 5 分者获胜"""
+        if self.scores[1] >= 5: return 1
+        if self.scores[-1] >= 5: return -1
+        return 0
 
     def get_candidate_moves(self):
+        """启发式搜索：仅搜索已有正常棋子周围的空位"""
         moves = set()
         for z in range(self.size):
             for y in range(self.size):
                 for x in range(self.size):
-                    if self.grid[z][y][x] != 0:
+                    if self.grid[z][y][x] in [1, -1]:  # 在正常棋子附近下棋
                         for dz in [-1, 0, 1]:
                             for dy in [-1, 0, 1]:
                                 for dx in [-1, 0, 1]:
@@ -67,148 +103,80 @@ class Gomoku3DBoard:
 
 
 # ==========================================
-# 模块2：AI算法模块 (3D 评估函数与 Alpha-Beta 剪枝)
+# 模块2：AI算法模块 (全新：基于动作价值模拟的浅层贪婪算法)
 # ==========================================
 class Gomoku3DAI:
-    def __init__(self, board_size=10, depth=1):
+    def __init__(self, board_size=15):
         self.size = board_size
-        self.depth = depth
-
-    def evaluate_board(self, board_obj, ai_player):
-        score = 0
-        grid = board_obj.grid
-        directions = [
-            (1, 0, 0), (0, 1, 0), (0, 0, 1),
-            (1, 1, 0), (1, -1, 0), (1, 0, 1), (1, 0, -1), (0, 1, 1), (0, 1, -1),
-            (1, 1, 1), (1, 1, -1), (1, -1, 1), (-1, 1, 1)
-        ]
-
-        for z in range(self.size):
-            for y in range(self.size):
-                for x in range(self.size):
-                    if grid[z][y][x] == 0: continue
-                    player = grid[z][y][x]
-
-                    for dx, dy, dz in directions:
-                        px, py, pz = x - dx, y - dy, z - dz
-                        if 0 <= px < self.size and 0 <= py < self.size and 0 <= pz < self.size and grid[pz][py][
-                            px] == player:
-                            continue
-
-                        count = 1
-                        nx, ny, nz = x + dx, y + dy, z + dz
-                        while 0 <= nx < self.size and 0 <= ny < self.size and 0 <= nz < self.size and grid[nz][ny][
-                            nx] == player:
-                            count += 1
-                            nx += dx;
-                            ny += dy;
-                            nz += dz
-
-                        blocks = 0
-                        if not (0 <= px < self.size and 0 <= py < self.size and 0 <= pz < self.size) or grid[pz][py][
-                            px] != 0: blocks += 1
-                        if not (0 <= nx < self.size and 0 <= ny < self.size and 0 <= nz < self.size) or grid[nz][ny][
-                            nx] != 0: blocks += 1
-
-                        pts = 0
-                        if count >= 5:
-                            pts = 100000
-                        elif count == 4:
-                            pts = 10000 if blocks == 0 else 1000
-                        elif count == 3:
-                            pts = 1000 if blocks == 0 else 100
-                        elif count == 2:
-                            pts = 100 if blocks == 0 else 10
-
-                        if player == ai_player:
-                            score += pts
-                        else:
-                            score -= pts * 2
-        return score
-
-    def minimax(self, board_obj, depth, alpha, beta, is_maximizing, ai_player):
-        if depth == 0: return self.evaluate_board(board_obj, ai_player)
-
-        moves = board_obj.get_candidate_moves()
-        if not moves: return 0
-        human_player = -ai_player
-
-        if is_maximizing:
-            max_eval = -math.inf
-            for x, y, z in moves:
-                board_obj.grid[z][y][x] = ai_player
-                if board_obj.check_win(x, y, z, ai_player):
-                    board_obj.grid[z][y][x] = 0
-                    return 100000 + depth
-                eval = self.minimax(board_obj, depth - 1, alpha, beta, False, ai_player)
-                board_obj.grid[z][y][x] = 0
-                max_eval = max(max_eval, eval)
-                alpha = max(alpha, eval)
-                if beta <= alpha: break
-            return max_eval
-        else:
-            min_eval = math.inf
-            for x, y, z in moves:
-                board_obj.grid[z][y][x] = human_player
-                if board_obj.check_win(x, y, z, human_player):
-                    board_obj.grid[z][y][x] = 0
-                    return -100000 - depth
-                eval = self.minimax(board_obj, depth - 1, alpha, beta, True, ai_player)
-                board_obj.grid[z][y][x] = 0
-                min_eval = min(min_eval, eval)
-                beta = min(beta, eval)
-                if beta <= alpha: break
-            return min_eval
 
     def get_best_move(self, board_obj, ai_player):
-        best_val = -math.inf
-        best_move = None
+        """
+        颠覆规则下，AI的思维方式改变：
+        1. 极力寻找自己落子后能立刻得分的坐标。
+        2. 极力寻找如果不下，对手下就能得分的坐标（抢夺与破坏）。
+        3. 避免自己形成纯色连五（变成废物），但可以帮对手凑纯色废棋。
+        """
         moves = board_obj.get_candidate_moves()
-
         if not moves:
             mid = self.size // 2
             return (mid, mid, mid)
 
+        best_move = None
+        max_score = -math.inf
+
         for x, y, z in moves:
+            # 模拟：如果 AI 下在这里
+            backup = copy.deepcopy(board_obj.grid), board_obj.scores.copy()
             board_obj.grid[z][y][x] = ai_player
-            if board_obj.check_win(x, y, z, ai_player):
-                board_obj.grid[z][y][x] = 0
+            board_obj._process_chains(x, y, z)
+            ai_gain = board_obj.scores[ai_player] - backup[1][ai_player]
+
+            if board_obj.scores[ai_player] >= 5:
+                # 这一步能直接绝杀赢下游戏，直接返回！
+                board_obj.grid, board_obj.scores = backup
                 return (x, y, z)
+            board_obj.grid, board_obj.scores = backup
 
-            move_val = self.minimax(board_obj, self.depth - 1, -math.inf, math.inf, False, ai_player)
-            board_obj.grid[z][y][x] = 0
+            # 模拟：如果 玩家 下在这里 (威胁评估)
+            backup = copy.deepcopy(board_obj.grid), board_obj.scores.copy()
+            board_obj.grid[z][y][x] = -ai_player
+            board_obj._process_chains(x, y, z)
+            human_gain = board_obj.scores[-ai_player] - backup[1][-ai_player]
+            board_obj.grid, board_obj.scores = backup
 
-            if move_val > best_val:
+            # 综合评分体系
+            # - 能得分是最高优先级 (1000)
+            # - 阻止对手得分也是最高优先级 (900)
+            # - 倾向于在靠近棋盘中心区域发展布局 (0.1)
+            dist_to_center = -((x - 7) ** 2 + (y - 7) ** 2 + (z - 7) ** 2)
+            eval_score = ai_gain * 1000 + human_gain * 900 + dist_to_center * 0.1
+
+            if eval_score > max_score:
+                max_score = eval_score
                 best_move = (x, y, z)
-                best_val = move_val
 
         return best_move if best_move else moves[0]
 
 
 # ==========================================
-# 模块3：多界面应用程序架构 (主菜单 + 游戏界面)
+# 模块3：多界面应用程序架构 (主菜单 + 自适应15格的游戏界面)
 # ==========================================
 class MainMenuFrame(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent, bg="#1E293B")
         self.controller = controller
 
-        # UI 美化：背景与标题
-        title_canvas = tk.Canvas(self, bg="#1E293B", highlightthickness=0, width=600, height=150)
+        title_canvas = tk.Canvas(self, bg="#1E293B", highlightthickness=0, width=800, height=180)
         title_canvas.place(relx=0.5, rely=0.3, anchor="center")
 
-        # 阴影效果
-        title_canvas.create_text(303, 78, text="三维五子棋游戏", font=("Microsoft YaHei", 42, "bold"), fill="#0F172A")
-        title_canvas.create_text(300, 75, text="三维五子棋游戏", font=("Microsoft YaHei", 42, "bold"), fill="#F8FAFC")
-        title_canvas.create_text(300, 130, text="True 3D Spatial Gomoku AI", font=("Arial", 14), fill="#94A3B8")
+        title_canvas.create_text(403, 78, text="融解与凝固：三维五子棋", font=("Microsoft YaHei", 40, "bold"),
+                                 fill="#0F172A")
+        title_canvas.create_text(400, 75, text="融解与凝固：三维五子棋", font=("Microsoft YaHei", 40, "bold"),
+                                 fill="#F8FAFC")
+        title_canvas.create_text(400, 130, text="15x15x15 异色消除规则 | 全新策略博弈", font=("Arial", 16),
+                                 fill="#94A3B8")
 
-        # 按钮样式配置
-        btn_style = {
-            "font": ("Microsoft YaHei", 16, "bold"),
-            "width": 14,
-            "bd": 0,
-            "cursor": "hand2"
-        }
+        btn_style = {"font": ("Microsoft YaHei", 16, "bold"), "width": 14, "bd": 0, "cursor": "hand2"}
 
         start_btn = tk.Button(self, text="开始游戏", bg="#3B82F6", fg="white",
                               activebackground="#2563EB", activeforeground="white",
@@ -221,40 +189,32 @@ class MainMenuFrame(tk.Frame):
         exit_btn.place(relx=0.5, rely=0.68, anchor="center")
 
     def show_role_selection(self):
-        # 弹窗选择阵营
         popup = tk.Toplevel(self)
         popup.title("选择阵营")
         popup.geometry("340x220")
         popup.configure(bg="#F1F5F9")
         popup.resizable(False, False)
 
-        # 使弹窗居中
         popup.update_idletasks()
         x = self.controller.root.winfo_x() + (self.controller.root.winfo_width() - 340) // 2
         y = self.controller.root.winfo_y() + (self.controller.root.winfo_height() - 220) // 2
         popup.geometry(f"+{x}+{y}")
+        popup.grab_set()
 
-        popup.grab_set()  # 模态窗口
-
-        tk.Label(popup, text="请选择您的棋子颜色", font=("Microsoft YaHei", 14, "bold"), bg="#F1F5F9", fg="#333").pack(
+        tk.Label(popup, text="请选择您的阵营颜色", font=("Microsoft YaHei", 14, "bold"), bg="#F1F5F9", fg="#333").pack(
             pady=30)
 
         btn_frame = tk.Frame(popup, bg="#F1F5F9")
         btn_frame.pack()
 
-        def choose_black():
-            popup.destroy()
-            self.controller.start_game(1)  # 1 为黑棋
+        def choose_black(): popup.destroy(); self.controller.start_game(1)
 
-        def choose_white():
-            popup.destroy()
-            self.controller.start_game(-1)  # -1 为白棋
+        def choose_white(): popup.destroy(); self.controller.start_game(-1)
 
-        tk.Button(btn_frame, text="执黑 (玩家先手)", font=("Microsoft YaHei", 11), bg="#1E293B", fg="white",
-                  width=12, bd=0, command=choose_black).pack(side=tk.LEFT, padx=10)
-
-        tk.Button(btn_frame, text="执白 (AI先手)", font=("Microsoft YaHei", 11), bg="#FFFFFF", fg="black",
-                  width=12, bd=1, command=choose_white).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="黑棋 (玩家先)", font=("Microsoft YaHei", 11), bg="#1A1A1A", fg="white", width=12,
+                  bd=0, command=choose_black).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="白棋 (AI先)", font=("Microsoft YaHei", 11), bg="#FFFFFF", fg="black", width=12, bd=1,
+                  command=choose_white).pack(side=tk.LEFT, padx=10)
 
 
 class GameFrame(tk.Frame):
@@ -262,24 +222,23 @@ class GameFrame(tk.Frame):
         super().__init__(parent, bg="#F3F4F6")
         self.controller = controller
 
-        self.board_size = 10
-        self.cell_size = 35
-        self.margin = 30
+        self.board_size = 15  # 已扩大至 15
+        self.cell_size = 28  # 缩小单元格以适应画布
+        self.margin = 25
         self.current_z = self.board_size // 2
 
         self.azimuth = math.pi / 4
         self.elevation = math.pi / 6
-        self.scale_3d = 26
+        self.scale_3d = 16  # 缩小初始 3D 比例以适应 15 的尺度
         self.last_mouse_x = 0
         self.last_mouse_y = 0
 
-        # 定时器相关
         self.human_timer_id = None
         self.ai_wait_timer_id = None
         self.time_left = 60
         self.ai_wait_seconds = 5
 
-        self.ai = Gomoku3DAI(self.board_size, depth=1)
+        self.ai = Gomoku3DAI(self.board_size)
         self.human_color = human_color
         self.ai_color = -human_color
 
@@ -303,9 +262,14 @@ class GameFrame(tk.Frame):
 
         self.status_var = tk.StringVar()
         tk.Label(top_frame, textvariable=self.status_var, font=("Microsoft YaHei", 12, "bold"), bg="#FFFFFF",
-                 fg="#374151").pack(side=tk.LEFT, padx=20)
+                 fg="#374151").pack(side=tk.LEFT, padx=15)
 
-        # ★ 游戏进行中常驻的结束游戏按钮 ★
+        # 新增：实时计分板
+        self.score_var = tk.StringVar()
+        self.score_var.set("得分战况 >> 黑棋: 0/5 | 白棋: 0/5")
+        tk.Label(top_frame, textvariable=self.score_var, font=("Microsoft YaHei", 12, "bold"), bg="#FEF3C7",
+                 fg="#D97706", padx=15).pack(side=tk.LEFT, padx=10)
+
         tk.Button(top_frame, text="结束游戏", font=("Microsoft YaHei", 10, "bold"), bg="#EF4444", fg="white",
                   bd=0, command=self.return_to_menu).pack(side=tk.RIGHT, padx=20, pady=15)
 
@@ -316,11 +280,12 @@ class GameFrame(tk.Frame):
         left_frame = tk.Frame(main_frame, bg="#F3F4F6")
         left_frame.pack(side=tk.LEFT, padx=20)
 
-        tk.Label(left_frame, text="2D 切片操作区 (在此精准落子)", font=("Microsoft YaHei", 10, "bold"), bg="#F3F4F6",
-                 fg="#4B5563").pack(pady=5)
+        tk.Label(left_frame, text=f"2D 切片 ({self.board_size}x{self.board_size}) 自由落子",
+                 font=("Microsoft YaHei", 10, "bold"), bg="#F3F4F6", fg="#4B5563").pack(pady=5)
 
         self.z_slider = tk.Scale(left_frame, from_=0, to=self.board_size - 1, orient=tk.HORIZONTAL,
-                                 label="当前楼层 (Z轴)", command=self.on_z_change, bg="#F3F4F6", highlightthickness=0)
+                                 label="当前楼层深度 (Z轴)", command=self.on_z_change, bg="#F3F4F6",
+                                 highlightthickness=0)
         self.z_slider.set(self.current_z)
         self.z_slider.pack(fill=tk.X, pady=5)
 
@@ -331,11 +296,11 @@ class GameFrame(tk.Frame):
         self.canvas_2d.bind("<Button-1>", self.on_click_2d)
 
         right_frame = tk.Frame(main_frame, bg="#F3F4F6")
-        right_frame.pack(side=tk.LEFT, padx=20)
-        tk.Label(right_frame, text="3D 空间全景预览 (拖拽旋转 / 滚轮缩放)", font=("Microsoft YaHei", 10, "bold"),
-                 bg="#F3F4F6", fg="#4B5563").pack(pady=5)
+        right_frame.pack(side=tk.LEFT, padx=10)
+        tk.Label(right_frame, text="3D 全景空间 (拖拽旋转 / 滚轮缩放 / 满5同色凝固)",
+                 font=("Microsoft YaHei", 10, "bold"), bg="#F3F4F6", fg="#4B5563").pack(pady=5)
 
-        self.canvas_3d = tk.Canvas(right_frame, width=550, height=550, bg="#E8F0F8", highlightthickness=2,
+        self.canvas_3d = tk.Canvas(right_frame, width=580, height=550, bg="#E8F0F8", highlightthickness=2,
                                    highlightbackground="#D1D5DB")
         self.canvas_3d.pack()
 
@@ -345,7 +310,9 @@ class GameFrame(tk.Frame):
         self.canvas_3d.bind("<Button-4>", self.on_mouse_wheel)
         self.canvas_3d.bind("<Button-5>", self.on_mouse_wheel)
 
-        # --- 定时器逻辑控制 ---
+    def update_score_board(self):
+        scores = self.game.scores
+        self.score_var.set(f"融解战况 >> 黑棋: {scores[1]}/5 | 白棋: {scores[-1]}/5")
 
     def cancel_all_timers(self):
         if self.human_timer_id:
@@ -363,9 +330,7 @@ class GameFrame(tk.Frame):
     def update_human_timer(self):
         if self.is_game_over or self.current_player != self.human_color:
             return
-
         self.timer_var.set(f"倒计时: {self.time_left}s")
-
         if self.time_left <= 0:
             self.force_human_move_by_ai()
         else:
@@ -381,44 +346,42 @@ class GameFrame(tk.Frame):
     def update_ai_wait_timer(self):
         if self.is_game_over or self.current_player != self.ai_color:
             return
-
         if self.ai_wait_seconds > 0:
             self.status_var.set(f"等待 AI 落子... ({self.ai_wait_seconds}s)")
             self.ai_wait_seconds -= 1
             self.ai_wait_timer_id = self.after(1000, self.update_ai_wait_timer)
         else:
-            self.status_var.set("AI 思考中(3D空间测算较慢)...")
+            self.status_var.set("AI 计算最佳消除点...")
             self.update()
             self.after(50, self.ai_turn)
 
     def force_human_move_by_ai(self):
         if self.is_game_over: return
-        self.status_var.set("时间到！系统正在为您代下...")
+        self.status_var.set("时间到！系统代下...")
         self.update()
 
         x, y, z = self.ai.get_best_move(self.game, self.human_color)
         self.game.place_piece(x, y, z, self.human_color)
 
+        self.update_score_board()
         self.draw_2d_board()
         self.draw_3d_preview()
 
-        if self.game.check_win(x, y, z, self.human_color):
-            self.game_over("超时自动落子：恭喜玩家获胜！")
+        winner = self.game.check_win()
+        if winner != 0:
+            winner_str = "玩家" if winner == self.human_color else "AI"
+            self.game_over(f"积分达到 5 分，{winner_str} 获胜！")
         else:
             self.current_player = self.ai_color
             self.start_ai_wait_countdown(5)
 
     def return_to_menu(self):
-        """安全停止游戏并返回主菜单"""
         self.cancel_all_timers()
         self.controller.show_main_menu()
 
-    # --- 交互与渲染引擎 ---
     def on_mouse_wheel(self, event):
-        if event.num == 5 or event.delta < 0:
-            self.scale_3d = max(10, self.scale_3d - 2)
-        if event.num == 4 or event.delta > 0:
-            self.scale_3d = min(60, self.scale_3d + 2)
+        if event.num == 5 or event.delta < 0: self.scale_3d = max(8, self.scale_3d - 1.5)
+        if event.num == 4 or event.delta > 0: self.scale_3d = min(50, self.scale_3d + 1.5)
         self.draw_3d_preview()
 
     def start_drag(self, event):
@@ -444,11 +407,22 @@ class GameFrame(tk.Frame):
         self.canvas_2d.delete("all")
         for i in range(self.board_size):
             x = self.margin + i * self.cell_size
-            self.canvas_2d.create_line(x, self.margin, x, self.margin + (self.board_size - 1) * self.cell_size)
+            self.canvas_2d.create_line(x, self.margin, x, self.margin + (self.board_size - 1) * self.cell_size,
+                                       fill="#B8905B")
             y = self.margin + i * self.cell_size
-            self.canvas_2d.create_line(self.margin, y, self.margin + (self.board_size - 1) * self.cell_size, y)
+            self.canvas_2d.create_line(self.margin, y, self.margin + (self.board_size - 1) * self.cell_size, y,
+                                       fill="#B8905B")
 
-        last_move = self.game.history[-1] if self.game.history else None
+        # history中存的是包含整个棋盘状态的元组，此处只需提取最后一个落子的坐标进行红点高亮(如果它没有被融解)
+        # 简单处理：由于融解，历史落子可能已经不在棋盘上，我们通过比较前后差异找出一个新增的点
+        last_move = None
+        if len(self.game.history) > 0:
+            last_grid = self.game.history[-1][0]
+            for z in range(self.board_size):
+                for y in range(self.board_size):
+                    for x in range(self.board_size):
+                        if last_grid[z][y][x] == 0 and self.game.grid[z][y][x] != 0:
+                            last_move = (x, y, z)
 
         for y in range(self.board_size):
             for x in range(self.board_size):
@@ -457,48 +431,63 @@ class GameFrame(tk.Frame):
                     px = self.margin + x * self.cell_size
                     py = self.margin + y * self.cell_size
                     r = self.cell_size * 0.4
-                    color = "#222222" if piece == 1 else "#F8F8F8"
-                    out_c = "#000000" if piece == 1 else "#999999"
+
+                    if piece == 1:
+                        color, out_c = "#1A1A1A", "#000000"
+                    elif piece == -1:
+                        color, out_c = "#F8F8F8", "#999999"
+                    elif piece == 2:  # 凝固的废棋
+                        color, out_c = "#6B7280", "#374151"
+
                     self.canvas_2d.create_oval(px - r, py - r, px + r, py + r, fill=color, outline=out_c)
 
-                    # ★ 新增：高亮显示最新落子 (红点) ★
-                    if last_move and (x, y, self.current_z) == last_move:
+                    if piece == 2:  # 画个叉代表石头
+                        self.canvas_2d.create_line(px - r / 2, py - r / 2, px + r / 2, py + r / 2, fill="#9CA3AF",
+                                                   width=2)
+                        self.canvas_2d.create_line(px + r / 2, py - r / 2, px - r / 2, py + r / 2, fill="#9CA3AF",
+                                                   width=2)
+
+                    if last_move and (x, y, self.current_z) == last_move and piece in [1, -1]:
                         self.canvas_2d.create_oval(px - 3, py - 3, px + 3, py + 3, fill="red", outline="red")
 
     def draw_3d_preview(self):
         self.canvas_3d.delete("all")
-        cx, cy = 275, 275
+        cx, cy = 290, 275
         scale = self.scale_3d
 
         def map_3d(x, y, z):
             dx = x - (self.board_size - 1) / 2.0
             dy = y - (self.board_size - 1) / 2.0
             dz = z - (self.board_size - 1) / 2.0
-
             x1 = dx * math.cos(self.azimuth) - dy * math.sin(self.azimuth)
             y1 = dx * math.sin(self.azimuth) + dy * math.cos(self.azimuth)
-
             y2 = y1 * math.cos(self.elevation) - dz * math.sin(self.elevation)
             z2 = y1 * math.sin(self.elevation) + dz * math.cos(self.elevation)
-
             return cx + x1 * scale, cy + y2 * scale, z2
 
         grid_color = "#C5D3E8"
         for i in range(self.board_size):
             for j in range(self.board_size):
-                sx1, sy1, _ = map_3d(0, i, j)
+                sx1, sy1, _ = map_3d(0, i, j);
                 sx2, sy2, _ = map_3d(self.board_size - 1, i, j)
                 self.canvas_3d.create_line(sx1, sy1, sx2, sy2, fill=grid_color, width=1)
-
-                sx1, sy1, _ = map_3d(i, 0, j)
+                sx1, sy1, _ = map_3d(i, 0, j);
                 sx2, sy2, _ = map_3d(i, self.board_size - 1, j)
                 self.canvas_3d.create_line(sx1, sy1, sx2, sy2, fill=grid_color, width=1)
-
-                sx1, sy1, _ = map_3d(i, j, 0)
+                sx1, sy1, _ = map_3d(i, j, 0);
                 sx2, sy2, _ = map_3d(i, j, self.board_size - 1)
                 self.canvas_3d.create_line(sx1, sy1, sx2, sy2, fill=grid_color, width=1)
 
         mapped_pieces = []
+        last_move = None
+        if len(self.game.history) > 0:
+            last_grid = self.game.history[-1][0]
+            for z in range(self.board_size):
+                for y in range(self.board_size):
+                    for x in range(self.board_size):
+                        if last_grid[z][y][x] == 0 and self.game.grid[z][y][x] != 0:
+                            last_move = (x, y, z)
+
         for z in range(self.board_size):
             for y in range(self.board_size):
                 for x in range(self.board_size):
@@ -507,30 +496,32 @@ class GameFrame(tk.Frame):
                         sx, sy, depth = map_3d(x, y, z)
                         mapped_pieces.append((x, y, z, sx, sy, depth, player))
 
-        mapped_pieces.sort(key=lambda p: p[5])  # 按深度排序
-        last_move = self.game.history[-1] if self.game.history else None
+        mapped_pieces.sort(key=lambda p: p[5])
 
         for x, y, orig_z, sx, sy, depth, player in mapped_pieces:
-            r = max(4, self.scale_3d * 0.35)
+            r = max(3, self.scale_3d * 0.35)
 
             if player == 1:
                 fill_c, out_c = "#1A1A1A", "#000000"
-            else:
+            elif player == -1:
                 fill_c, out_c = "#F8F8F8", "#999999"
+            elif player == 2:
+                fill_c, out_c = "#6B7280", "#4B5563"  # 废棋颜色
 
             if orig_z == self.current_z:
                 self.canvas_3d.create_oval(sx - r - 3, sy - r - 3, sx + r + 3, sy + r + 3, outline="#FF5722", width=2)
 
             self.canvas_3d.create_oval(sx - r, sy - r, sx + r, sy + r, fill=fill_c, outline=out_c)
 
-            # ★ 新增：高亮显示最新落子 (在3D中心画个红点) ★
-            if last_move and (x, y, orig_z) == last_move:
-                self.canvas_3d.create_oval(sx - 3, sy - 3, sx + 3, sy + 3, fill="red", outline="red")
-            else:
-                # 正常的光泽高光
+            if last_move and (x, y, orig_z) == last_move and player in [1, -1]:
+                self.canvas_3d.create_oval(sx - 2, sy - 2, sx + 2, sy + 2, fill="red", outline="red")
+            elif player in [1, -1]:
                 hx, hy = sx - r / 3, sy - r / 3
                 self.canvas_3d.create_oval(hx - r * 0.15, hy - r * 0.15, hx + r * 0.2, hy + r * 0.2, fill="#FFFFFF",
                                            outline="")
+            elif player == 2:
+                self.canvas_3d.create_line(sx - r / 2, sy - r / 2, sx + r / 2, sy + r / 2, fill="#9CA3AF")
+                self.canvas_3d.create_line(sx + r / 2, sy - r / 2, sx - r / 2, sy + r / 2, fill="#9CA3AF")
 
     def on_click_2d(self, event):
         if self.is_game_over or self.current_player != self.human_color: return
@@ -541,12 +532,14 @@ class GameFrame(tk.Frame):
 
         if 0 <= x < self.board_size and 0 <= y < self.board_size:
             if self.game.place_piece(x, y, z, self.human_color):
+                self.update_score_board()
                 self.draw_2d_board()
                 self.draw_3d_preview()
 
-                if self.game.check_win(x, y, z, self.human_color):
+                winner = self.game.check_win()
+                if winner != 0:
                     self.cancel_all_timers()
-                    self.game_over("恭喜！玩家获胜！")
+                    self.game_over(f"积分达到 5 分，恭喜玩家获胜！")
                 else:
                     self.current_player = self.ai_color
                     self.start_ai_wait_countdown(5)
@@ -558,12 +551,14 @@ class GameFrame(tk.Frame):
 
         self.current_z = z
         self.z_slider.set(z)
+        self.update_score_board()
         self.draw_2d_board()
         self.draw_3d_preview()
 
-        if self.game.check_win(x, y, z, self.ai_color):
+        winner = self.game.check_win()
+        if winner != 0:
             self.cancel_all_timers()
-            self.game_over("很遗憾，AI获胜！")
+            self.game_over("积分达到 5 分，很遗憾，AI 获胜！")
         else:
             self.current_player = self.human_color
             color_str = "黑棋" if self.human_color == 1 else "白棋"
@@ -579,20 +574,18 @@ class GameFrame(tk.Frame):
                 self.game.undo_move()
                 self.current_player = self.human_color
                 self.start_human_timer()
-                color_str = "黑棋" if self.human_color == 1 else "白棋"
-                self.status_var.set(f"玩家回合 ({color_str})")
-                self.draw_2d_board()
-                self.draw_3d_preview()
         elif self.current_player == self.human_color:
             if len(self.game.history) >= 2:
                 self.cancel_all_timers()
                 self.game.undo_move()
                 self.game.undo_move()
                 self.start_human_timer()
-                color_str = "黑棋" if self.human_color == 1 else "白棋"
-                self.status_var.set(f"玩家回合 ({color_str})")
-                self.draw_2d_board()
-                self.draw_3d_preview()
+
+        color_str = "黑棋" if self.human_color == 1 else "白棋"
+        self.status_var.set(f"玩家回合 ({color_str})")
+        self.update_score_board()
+        self.draw_2d_board()
+        self.draw_3d_preview()
 
     def game_over(self, msg):
         self.cancel_all_timers()
@@ -605,11 +598,9 @@ class GameFrame(tk.Frame):
         self.cancel_all_timers()
         self.game = Gomoku3DBoard(self.board_size)
         self.is_game_over = False
-
-        # 始终保持进入时的阵营选择 (黑棋规定为 1, 白棋 -1)
-        # 约定：黑棋(1)永远先手
         self.current_player = 1
 
+        self.update_score_board()
         self.draw_2d_board()
         self.draw_3d_preview()
         color_str = "黑棋" if self.human_color == 1 else "白棋"
@@ -618,7 +609,6 @@ class GameFrame(tk.Frame):
             self.status_var.set(f"玩家回合 ({color_str})")
             self.start_human_timer()
         else:
-            # 第一手免受5秒折磨，立刻下
             self.start_ai_wait_countdown(1)
 
 
@@ -628,8 +618,8 @@ class GameFrame(tk.Frame):
 class GomokuApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("三维五子棋游戏")
-        self.root.geometry("1000x700")
+        self.root.title("融解与凝固：三维五子棋")
+        self.root.geometry("1100x750")  # 扩大窗口以适应 15x15
         self.root.configure(bg="#1E293B")
 
         self.current_frame = None
