@@ -17,7 +17,7 @@ class Gomoku3DBoard:
 
     def place_piece(self, x, y, z, player):
         if self.grid[z][y][x] == 0:
-            # 深拷贝保存历史，以便完美撤销因为融解和凝固而改变的地形
+            # 深拷贝保存历史，用于玩家真实的悔棋操作
             self.history.append((copy.deepcopy(self.grid), self.scores.copy()))
             self.grid[z][y][x] = player
             self._process_chains(x, y, z)
@@ -41,7 +41,6 @@ class Gomoku3DBoard:
         ]
 
         for dx, dy, dz in directions:
-            # 寻找包含落子点 (x,y,z) 的所有 5 个长度的线段起点
             for offset in range(-4, 1):
                 chain = []
                 valid = True
@@ -52,46 +51,39 @@ class Gomoku3DBoard:
 
                     if 0 <= nx < self.size and 0 <= ny < self.size and 0 <= nz < self.size:
                         state = self.grid[nz][ny][nx]
-                        # 只有正常的黑白棋子能参与计算，空位(0)或废棋(2)会打断链条
                         if state in [1, -1]:
                             chain.append((nx, ny, nz, state))
                         else:
-                            valid = False
+                            valid = False;
                             break
                     else:
-                        valid = False
+                        valid = False;
                         break
 
-                # 如果发现一条完整的 5 子链
                 if valid and len(chain) == 5:
                     c_black = sum(1 for _, _, _, s in chain if s == 1)
                     c_white = sum(1 for _, _, _, s in chain if s == -1)
 
                     if c_black == 5 or c_white == 5:
-                        # 纯色连五 -> 凝固成废棋 (状态 2)
                         for cx, cy, cz, _ in chain:
                             self.grid[cz][cy][cx] = 2
                     elif c_black + c_white == 5:
-                        # 混合颜色连五 -> 融解得分！
                         majority = 1 if c_black > c_white else -1
                         self.scores[majority] += 1
-                        # 从棋盘上彻底消除这五颗子 (腾出空间)
                         for cx, cy, cz, _ in chain:
                             self.grid[cz][cy][cx] = 0
 
     def check_win(self):
-        """胜负判定：先达到 5 分者获胜"""
         if self.scores[1] >= 5: return 1
         if self.scores[-1] >= 5: return -1
         return 0
 
     def get_candidate_moves(self):
-        """启发式搜索：仅搜索已有正常棋子周围的空位"""
         moves = set()
         for z in range(self.size):
             for y in range(self.size):
                 for x in range(self.size):
-                    if self.grid[z][y][x] in [1, -1]:  # 在正常棋子附近下棋
+                    if self.grid[z][y][x] in [1, -1]:
                         for dz in [-1, 0, 1]:
                             for dy in [-1, 0, 1]:
                                 for dx in [-1, 0, 1]:
@@ -101,23 +93,79 @@ class Gomoku3DBoard:
                                         moves.add((nx, ny, nz))
         return list(moves)
 
+    # ---------------------------------------------------------
+    # 新增：专为 AI 设计的“极速状态推演引擎” (避免深度拷贝造成的卡顿)
+    # ---------------------------------------------------------
+    def simulate_place(self, x, y, z, player):
+        """高效模拟落子，返回被改变的差异数据，实现毫秒级推演"""
+        if self.grid[z][y][x] != 0:
+            return None
+
+        changes = []  # 记录 (cx, cy, cz, 改变前的值)
+        old_scores = self.scores.copy()
+
+        self.grid[z][y][x] = player
+        changes.append((x, y, z, 0))
+
+        directions = [
+            (1, 0, 0), (0, 1, 0), (0, 0, 1),
+            (1, 1, 0), (1, -1, 0), (1, 0, 1), (1, 0, -1), (0, 1, 1), (0, 1, -1),
+            (1, 1, 1), (1, 1, -1), (1, -1, 1), (-1, 1, 1)
+        ]
+        for dx, dy, dz in directions:
+            for offset in range(-4, 1):
+                chain = []
+                valid = True
+                for i in range(5):
+                    nx = x + dx * (offset + i)
+                    ny = y + dy * (offset + i)
+                    nz = z + dz * (offset + i)
+                    if 0 <= nx < self.size and 0 <= ny < self.size and 0 <= nz < self.size:
+                        state = self.grid[nz][ny][nx]
+                        if state in [1, -1]:
+                            chain.append((nx, ny, nz, state))
+                        else:
+                            valid = False; break
+                    else:
+                        valid = False; break
+
+                if valid and len(chain) == 5:
+                    c_black = sum(1 for _, _, _, s in chain if s == 1)
+                    c_white = sum(1 for _, _, _, s in chain if s == -1)
+
+                    if c_black == 5 or c_white == 5:
+                        for cx, cy, cz, _ in chain:
+                            if self.grid[cz][cy][cx] != 2:
+                                changes.append((cx, cy, cz, self.grid[cz][cy][cx]))
+                                self.grid[cz][cy][cx] = 2
+                    elif c_black + c_white == 5:
+                        majority = 1 if c_black > c_white else -1
+                        self.scores[majority] += 1
+                        for cx, cy, cz, _ in chain:
+                            if self.grid[cz][cy][cx] != 0:
+                                changes.append((cx, cy, cz, self.grid[cz][cy][cx]))
+                                self.grid[cz][cy][cx] = 0
+        return changes, old_scores
+
+    def simulate_undo(self, changes, old_scores):
+        """利用差异数据快速恢复棋盘，不留痕迹"""
+        for cx, cy, cz, old_val in reversed(changes):
+            self.grid[cz][cy][cx] = old_val
+        self.scores = old_scores
+
 
 # ==========================================
-# 模块2：AI算法模块 (全新：基于动作价值模拟的浅层贪婪算法)
+# 模块2：AI算法模块 (全面升级的高级战术评估网络)
 # ==========================================
 class Gomoku3DAI:
     def __init__(self, board_size=15):
         self.size = board_size
 
     def get_best_move(self, board_obj, ai_player):
-        """
-        颠覆规则下，AI的思维方式改变：
-        1. 极力寻找自己落子后能立刻得分的坐标。
-        2. 极力寻找如果不下，对手下就能得分的坐标（抢夺与破坏）。
-        3. 避免自己形成纯色连五（变成废物），但可以帮对手凑纯色废棋。
-        """
+        hu_player = -ai_player
         moves = board_obj.get_candidate_moves()
-        if not moves:
+
+        if not moves:  # 应对开局第一手
             mid = self.size // 2
             return (mid, mid, mid)
 
@@ -125,37 +173,117 @@ class Gomoku3DAI:
         max_score = -math.inf
 
         for x, y, z in moves:
-            # 模拟：如果 AI 下在这里
-            backup = copy.deepcopy(board_obj.grid), board_obj.scores.copy()
-            board_obj.grid[z][y][x] = ai_player
-            board_obj._process_chains(x, y, z)
-            ai_gain = board_obj.scores[ai_player] - backup[1][ai_player]
+            # 1. 使用极速引擎推演落子后的平行宇宙状态
+            sim_result = board_obj.simulate_place(x, y, z, ai_player)
+            if not sim_result: continue
+            changes, old_scores = sim_result
 
-            if board_obj.scores[ai_player] >= 5:
-                # 这一步能直接绝杀赢下游戏，直接返回！
-                board_obj.grid, board_obj.scores = backup
+            ai_gain = board_obj.scores[ai_player] - old_scores[ai_player]
+            hu_gain = board_obj.scores[hu_player] - old_scores[hu_player]
+
+            # 【绝杀检测】如果这步棋能让AI直接得分，这是完美的终极目标，直接选它！
+            if ai_gain > 0:
+                board_obj.simulate_undo(changes, old_scores)
                 return (x, y, z)
-            board_obj.grid, board_obj.scores = backup
 
-            # 模拟：如果 玩家 下在这里 (威胁评估)
-            backup = copy.deepcopy(board_obj.grid), board_obj.scores.copy()
-            board_obj.grid[z][y][x] = -ai_player
-            board_obj._process_chains(x, y, z)
-            human_gain = board_obj.scores[-ai_player] - backup[1][-ai_player]
-            board_obj.grid, board_obj.scores = backup
+            # 【排雷避险】如果这步棋下了反而导致玩家得分（融解出玩家占优的链条），绝对不能下！
+            if hu_gain > 0:
+                board_obj.simulate_undo(changes, old_scores)
+                continue
 
-            # 综合评分体系
-            # - 能得分是最高优先级 (1000)
-            # - 阻止对手得分也是最高优先级 (900)
-            # - 倾向于在靠近棋盘中心区域发展布局 (0.1)
-            dist_to_center = -((x - 7) ** 2 + (y - 7) ** 2 + (z - 7) ** 2)
-            eval_score = ai_gain * 1000 + human_gain * 900 + dist_to_center * 0.1
+            # 2. 如果没有立即发生融解，则审视落子后形成的空间阵法（形状打分）
+            shape_score = self.evaluate_shapes(board_obj, x, y, z, ai_player)
+
+            # 添加一点向心力，优先占据空间中心
+            dist_to_center = -((x - self.size // 2) ** 2 + (y - self.size // 2) ** 2 + (z - self.size // 2) ** 2)
+            eval_score = shape_score + dist_to_center * 0.1
 
             if eval_score > max_score:
                 max_score = eval_score
                 best_move = (x, y, z)
 
+            # 清理平行宇宙，恢复棋盘
+            board_obj.simulate_undo(changes, old_scores)
+
         return best_move if best_move else moves[0]
+
+    def evaluate_shapes(self, board_obj, x, y, z, ai_player):
+        """
+        高智商评估函数：根据“融解凝固”规则重写了所有棋型的价值观
+        """
+        hu_player = -ai_player
+        score = 0
+        directions = [
+            (1, 0, 0), (0, 1, 0), (0, 0, 1),
+            (1, 1, 0), (1, -1, 0), (1, 0, 1), (1, 0, -1), (0, 1, 1), (0, 1, -1),
+            (1, 1, 1), (1, 1, -1), (1, -1, 1), (-1, 1, 1)
+        ]
+        for dx, dy, dz in directions:
+            for offset in range(-4, 1):
+                window = []
+                valid = True
+                for i in range(5):
+                    nx = x + dx * (offset + i)
+                    ny = y + dy * (offset + i)
+                    nz = z + dz * (offset + i)
+                    if 0 <= nx < self.size and 0 <= ny < self.size and 0 <= nz < self.size:
+                        st = board_obj.grid[nz][ny][nx]
+                        if st in [1, -1, 0]:
+                            window.append(st)
+                        else:  # 废棋(2) 就像一堵墙，阻断一切
+                            valid = False;
+                            break
+                    else:
+                        valid = False;
+                        break
+
+                if valid and len(window) == 5:
+                    c_ai = window.count(ai_player)
+                    c_hu = window.count(hu_player)
+
+                    # ----------------------------------------------------
+                    # 战术选择 1: 构建致命陷阱与绞杀网
+                    # ----------------------------------------------------
+                    if c_ai == 3 and c_hu == 1:
+                        # 完美威胁：4个子中我有3个，下轮我再点一子就能得1分！
+                        score += 5000
+                    elif c_ai == 2 and c_hu == 1:
+                        # 战术牵制：形成 2:1 的包夹，逼迫玩家响应。玩家若应对不当就会送分
+                        score += 500
+                    elif c_ai == 1 and c_hu == 1:
+                        # 寻找战机：主动贴近玩家的孤子，创造异色融解条件
+                        score += 50
+
+                    # ----------------------------------------------------
+                    # 战术选择 2: 杜绝送人头，极其谨慎
+                    # ----------------------------------------------------
+                    elif c_ai == 2 and c_hu == 2:
+                        # 致命漏洞：因为现在轮到玩家下棋，2:2 意味着玩家一下就能拿到 3:2 得分。绝不走这一步！
+                        score -= 10000
+                    elif c_ai == 1 and c_hu == 3:
+                        # 送分童子：帮玩家补齐了最缺的异色子，下轮玩家绝杀。
+                        score -= 10000
+                    elif c_ai == 1 and c_hu == 2:
+                        # 糟糕的试探：让玩家占据了局部人数优势。
+                        score -= 500
+
+                    # ----------------------------------------------------
+                    # 战术选择 3: 对待纯色链的极度聪明处理
+                    # ----------------------------------------------------
+                    elif c_hu == 4 and c_ai == 0:
+                        # 看着对手作死：玩家已经连了4个纯色，再连就变石头了。AI不但不堵，反而心里暗爽。
+                        score += 200
+                    elif c_ai == 4 and c_hu == 0:
+                        # 避免死胡同：自己走纯色是没前途的（除非想强行造墙）
+                        score -= 100
+                    elif c_ai == 3 and c_hu == 0:
+                        score += 10
+                    elif c_ai == 2 and c_hu == 0:
+                        score += 5
+                    elif c_ai == 1 and c_hu == 0:
+                        score += 1
+
+        return score
 
 
 # ==========================================
@@ -173,7 +301,7 @@ class MainMenuFrame(tk.Frame):
                                  fill="#0F172A")
         title_canvas.create_text(400, 75, text="融解与凝固：三维五子棋", font=("Microsoft YaHei", 40, "bold"),
                                  fill="#F8FAFC")
-        title_canvas.create_text(400, 130, text="15x15x15 异色消除规则 | 全新策略博弈", font=("Arial", 16),
+        title_canvas.create_text(400, 130, text="15x15x15 异色消除规则 | 高级战术博弈", font=("Arial", 16),
                                  fill="#94A3B8")
 
         btn_style = {"font": ("Microsoft YaHei", 16, "bold"), "width": 14, "bd": 0, "cursor": "hand2"}
@@ -222,14 +350,14 @@ class GameFrame(tk.Frame):
         super().__init__(parent, bg="#F3F4F6")
         self.controller = controller
 
-        self.board_size = 15  # 已扩大至 15
-        self.cell_size = 28  # 缩小单元格以适应画布
+        self.board_size = 15
+        self.cell_size = 28
         self.margin = 25
         self.current_z = self.board_size // 2
 
         self.azimuth = math.pi / 4
         self.elevation = math.pi / 6
-        self.scale_3d = 16  # 缩小初始 3D 比例以适应 15 的尺度
+        self.scale_3d = 16
         self.last_mouse_x = 0
         self.last_mouse_y = 0
 
@@ -246,7 +374,6 @@ class GameFrame(tk.Frame):
         self.reset_game()
 
     def setup_ui(self):
-        # 顶层控制面板
         top_frame = tk.Frame(self, bg="#FFFFFF", height=60)
         top_frame.pack(side=tk.TOP, fill=tk.X, padx=20, pady=10)
 
@@ -264,7 +391,6 @@ class GameFrame(tk.Frame):
         tk.Label(top_frame, textvariable=self.status_var, font=("Microsoft YaHei", 12, "bold"), bg="#FFFFFF",
                  fg="#374151").pack(side=tk.LEFT, padx=15)
 
-        # 新增：实时计分板
         self.score_var = tk.StringVar()
         self.score_var.set("得分战况 >> 黑棋: 0/5 | 白棋: 0/5")
         tk.Label(top_frame, textvariable=self.score_var, font=("Microsoft YaHei", 12, "bold"), bg="#FEF3C7",
@@ -273,7 +399,6 @@ class GameFrame(tk.Frame):
         tk.Button(top_frame, text="结束游戏", font=("Microsoft YaHei", 10, "bold"), bg="#EF4444", fg="white",
                   bd=0, command=self.return_to_menu).pack(side=tk.RIGHT, padx=20, pady=15)
 
-        # 核心视图区
         main_frame = tk.Frame(self, bg="#F3F4F6")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -413,8 +538,6 @@ class GameFrame(tk.Frame):
             self.canvas_2d.create_line(self.margin, y, self.margin + (self.board_size - 1) * self.cell_size, y,
                                        fill="#B8905B")
 
-        # history中存的是包含整个棋盘状态的元组，此处只需提取最后一个落子的坐标进行红点高亮(如果它没有被融解)
-        # 简单处理：由于融解，历史落子可能已经不在棋盘上，我们通过比较前后差异找出一个新增的点
         last_move = None
         if len(self.game.history) > 0:
             last_grid = self.game.history[-1][0]
@@ -436,12 +559,12 @@ class GameFrame(tk.Frame):
                         color, out_c = "#1A1A1A", "#000000"
                     elif piece == -1:
                         color, out_c = "#F8F8F8", "#999999"
-                    elif piece == 2:  # 凝固的废棋
+                    elif piece == 2:
                         color, out_c = "#6B7280", "#374151"
 
                     self.canvas_2d.create_oval(px - r, py - r, px + r, py + r, fill=color, outline=out_c)
 
-                    if piece == 2:  # 画个叉代表石头
+                    if piece == 2:
                         self.canvas_2d.create_line(px - r / 2, py - r / 2, px + r / 2, py + r / 2, fill="#9CA3AF",
                                                    width=2)
                         self.canvas_2d.create_line(px + r / 2, py - r / 2, px - r / 2, py + r / 2, fill="#9CA3AF",
@@ -506,7 +629,7 @@ class GameFrame(tk.Frame):
             elif player == -1:
                 fill_c, out_c = "#F8F8F8", "#999999"
             elif player == 2:
-                fill_c, out_c = "#6B7280", "#4B5563"  # 废棋颜色
+                fill_c, out_c = "#6B7280", "#4B5563"
 
             if orig_z == self.current_z:
                 self.canvas_3d.create_oval(sx - r - 3, sy - r - 3, sx + r + 3, sy + r + 3, outline="#FF5722", width=2)
@@ -619,7 +742,7 @@ class GomokuApp:
     def __init__(self, root):
         self.root = root
         self.root.title("融解与凝固：三维五子棋")
-        self.root.geometry("1100x750")  # 扩大窗口以适应 15x15
+        self.root.geometry("1100x750")
         self.root.configure(bg="#1E293B")
 
         self.current_frame = None
