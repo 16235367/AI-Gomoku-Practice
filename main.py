@@ -2,7 +2,6 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import Dict, List
 import math
 import copy
 import random
@@ -10,7 +9,7 @@ import json
 
 
 # ==========================================
-# 核心游戏引擎与 AI 算法 (保持极速与高智商)
+# 核心游戏引擎与 AI 算法 (保持不变)
 # ==========================================
 class Board2D:
     def __init__(self, size=15):
@@ -277,7 +276,6 @@ class AI:
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# HTTP 模式状态 (AI 对战)
 game_session = {"board": None, "ai": None, "mode": "2D"}
 
 
@@ -334,7 +332,6 @@ def undo_move():
 # --- WebSocket 联机大厅管理 ---
 class ConnectionManager:
     def __init__(self):
-        # rooms 结构: { room_id: { "mode": "2D", "board": Board, "players": { websocket1: 1, websocket2: -1 }, "turn": 1 } }
         self.rooms = {}
 
     def get_or_create_room(self, room_id: str, mode: str):
@@ -362,14 +359,12 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, mode: str):
         await websocket.close()
         return
 
-    # 分配阵营：第一个进房间的执黑(1)，第二个执白(-1)
     assigned_color = 1 if len(room["players"]) == 0 else -1
     room["players"][websocket] = assigned_color
 
-    await websocket.send_text(json.dumps({"type": "connected", "color": assigned_color,
-                                          "msg": f"成功加入房间 {room_id}，您是{'黑棋(先手)' if assigned_color == 1 else '白棋(后手)'}"}))
+    await websocket.send_text(
+        json.dumps({"type": "connected", "color": assigned_color, "msg": f"成功加入房间 {room_id}"}))
 
-    # 如果满两人，通知双方游戏开始
     if len(room["players"]) == 2:
         for ws in room["players"]:
             await ws.send_text(json.dumps({
@@ -388,33 +383,31 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, mode: str):
                 if len(room["players"]) < 2:
                     await websocket.send_text(json.dumps({"type": "info", "msg": "请等待对手加入..."}))
                     continue
-                if room["turn"] != assigned_color:
-                    continue  # 不是你的回合
+                if room["turn"] != assigned_color: continue
 
                 x, y, z = payload["x"], payload["y"], payload["z"]
                 b = room["board"]
 
                 if b.place_piece(x, y, z, assigned_color):
                     is_win = b.check_win(assigned_color)
-                    if not is_win:
-                        room["turn"] = -assigned_color  # 切换回合
+                    if not is_win: room["turn"] = -assigned_color
 
-                    # 广播更新给房间内所有玩家
                     for ws in room["players"]:
                         await ws.send_text(json.dumps({
-                            "type": "update",
-                            "state": b.grid,
-                            "scores": b.scores,
-                            "lastMove": {"x": x, "y": y, "z": z},
-                            "turn": room["turn"],
-                            "isWin": is_win,
-                            "winner": assigned_color if is_win else 0
+                            "type": "update", "state": b.grid, "scores": b.scores,
+                            "lastMove": {"x": x, "y": y, "z": z}, "turn": room["turn"],
+                            "isWin": is_win, "winner": assigned_color if is_win else 0
                         }))
 
     except WebSocketDisconnect:
+        # ★ 断线安全清理逻辑加固 ★
         if websocket in room["players"]:
             del room["players"][websocket]
-        for ws in room["players"]:
-            await ws.send_text(json.dumps({"type": "opponent_left", "msg": "对手已断开连接！"}))
+        for ws_conn in list(room["players"].keys()):
+            try:
+                await ws_conn.send_text(json.dumps({"type": "opponent_left", "msg": "对手已断开连接！"}))
+            except:
+                pass
         if len(room["players"]) == 0:
-            del manager.rooms[room_id]  # 房间空了就销毁
+            if room_id in manager.rooms:
+                del manager.rooms[room_id]

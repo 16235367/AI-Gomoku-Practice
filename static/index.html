@@ -59,11 +59,20 @@
 
     <!-- 弹窗 3：联机开房 -->
     <div id="roomModal" class="hidden absolute inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur">
-        <div class="glass p-8 rounded-2xl w-96 border border-white/20 shadow-2xl">
-            <h2 class="text-2xl font-bold text-center mb-4 text-purple-400">创建或加入房间</h2>
-            <p class="text-sm text-slate-400 mb-6 text-center">输入房间号加入，留空则自动创建新房间。</p>
-            <input type="text" id="roomInput" placeholder="例如: 1234" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 mb-6 text-center text-xl text-white outline-none focus:border-purple-500 transition">
-            <button onclick="startGamePvP()" class="w-full bg-purple-600 hover:bg-purple-500 py-4 rounded-xl font-bold transition text-lg shadow-[0_0_15px_rgba(147,51,234,0.5)]">进入联机大厅</button>
+        <div class="glass p-8 rounded-2xl w-96 border border-white/20 shadow-2xl text-center">
+            <h2 class="text-2xl font-bold mb-6 text-purple-400">联机真人 PvP</h2>
+
+            <button onclick="createRoom()" class="w-full bg-purple-600 hover:bg-purple-500 py-3 rounded-xl font-bold transition text-lg mb-6 shadow-[0_0_15px_rgba(147,51,234,0.3)]">建个新房间</button>
+
+            <div class="flex items-center mb-6">
+                <div class="flex-1 h-px bg-slate-600"></div>
+                <span class="px-3 text-slate-400 text-sm">或者加入已有房间</span>
+                <div class="flex-1 h-px bg-slate-600"></div>
+            </div>
+
+            <input type="text" id="roomInput" placeholder="输入4位房间号" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 mb-4 text-center text-xl text-white outline-none focus:border-purple-500 transition" onkeypress="handleEnter(event)">
+            <button onclick="joinRoom()" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold transition text-lg">加入房间</button>
+
             <button onclick="document.getElementById('roomModal').classList.add('hidden')" class="mt-6 w-full py-2 text-slate-400 hover:text-white transition">返回</button>
         </div>
     </div>
@@ -92,7 +101,7 @@
                 </div>
                 <button id="pauseBtn" onclick="togglePause()" class="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg font-bold transition">暂停</button>
                 <button id="undoBtn" onclick="handleUndo()" class="px-5 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold">悔棋</button>
-                <button onclick="location.reload()" class="px-5 py-2 bg-red-600 hover:bg-red-500 rounded-lg font-bold">退出房间</button>
+                <button onclick="location.reload()" class="px-5 py-2 bg-red-600 hover:bg-red-500 rounded-lg font-bold">退出游戏</button>
             </div>
         </header>
 
@@ -116,7 +125,7 @@
                         <input type="range" id="zSlider" min="0" value="0" oninput="changeZ(this.value)">
                     </div>
 
-                    <!-- ★ 赋予 ID 以便 JS 动态修改居中或上移对齐 ★ -->
+                    <!-- 回滚布局：保持 items-center justify-center 全局垂直水平居中 -->
                     <div id="gridContainer" class="flex-1 flex items-center justify-center relative">
                         <div class="relative pl-8 pt-8">
                             <div class="absolute top-2 left-8 right-0 flex items-center text-red-400 font-bold text-sm"><span>0</span> <div class="flex-1 h-px bg-red-400/50 mx-2"></div> <span>X 轴</span> <span class="ml-1">▶</span></div>
@@ -138,13 +147,9 @@
     </div>
 
     <script>
-        // ================= 全局状态与网络管理 =================
-        let gameType = 'AI'; // 'AI' or 'PVP'
-        let mode = '2D', size = 15, currentZ = 0, myColor = 1, currentTurn = 1;
-        let isGameOver = false, timerObj, aiWaitObj, timeLeft = 60;
+        let gameType = 'AI', mode = '2D', size = 15, currentZ = 0, myColor = 1, currentTurn = 1;
+        let isGameOver = false, timerObj, aiWaitObj, timeLeft = 60, isPaused = false, pausedTurn = null, ws = null;
         let localState = null, lastMove = null;
-        let isPaused = false, pausedTurn = null;
-        let ws = null; // WebSocket 实例
 
         const API = {
             async init(m) { await fetch('/api/init', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode:m}) }); },
@@ -153,10 +158,22 @@
             async undo() { let res = await fetch('/api/undo', { method: 'POST' }); return await res.json(); }
         };
 
-        // ================= 菜单导航流 =================
         function openOpponentModal(m) { mode = m; document.getElementById('opponentModal').classList.remove('hidden'); }
         function openColorModal() { gameType = 'AI'; document.getElementById('opponentModal').classList.add('hidden'); document.getElementById('colorModal').classList.remove('hidden'); }
         function openRoomModal() { gameType = 'PVP'; document.getElementById('opponentModal').classList.add('hidden'); document.getElementById('roomModal').classList.remove('hidden'); }
+
+        function handleEnter(e) { if (e.key === 'Enter') joinRoom(); }
+
+        function createRoom() {
+            let roomId = Math.floor(1000 + Math.random() * 9000).toString();
+            startGamePvP(roomId);
+        }
+
+        function joinRoom() {
+            let roomId = document.getElementById('roomInput').value.trim();
+            if (!roomId) { alert("请输入要加入的房间号！"); return; }
+            startGamePvP(roomId);
+        }
 
         function setupBaseUI() {
             size = mode === '3D_NORMAL' ? 10 : 15;
@@ -173,25 +190,17 @@
             document.getElementById('zSlider').value = currentZ;
             document.getElementById('zLabel').innerText = `当前深度 Z = ${currentZ}`;
 
-            // ★ 优化：动态控制 2D 和 3D 模式下的布局对齐方式 ★
-            const gridContainer = document.getElementById('gridContainer');
-
+            // 恢复最初的完美居中布局逻辑，不再乱加 pt-16 等上移属性
             if (mode === '2D') {
                 document.getElementById('zControl').classList.add('hidden');
                 document.getElementById('canvas3d').classList.add('hidden');
                 document.getElementById('panel2D').classList.replace('w-[450px]', 'w-full');
-
-                // 2D 模式下：取消垂直居中，改为顶部对齐并增加 pt-16
-                gridContainer.classList.remove('items-center');
-                gridContainer.classList.add('pt-16');
             } else {
+                document.getElementById('zControl').classList.remove('hidden');
+                document.getElementById('canvas3d').classList.remove('hidden');
+                document.getElementById('panel2D').classList.replace('w-full', 'w-[450px]');
                 document.getElementById('scoreBoard').classList.toggle('hidden', mode !== '3D_MELT');
                 document.getElementById('axesLegend').classList.remove('hidden');
-
-                // 3D 模式下：恢复垂直居中，移除 pt-16
-                gridContainer.classList.remove('pt-16');
-                gridContainer.classList.add('items-center');
-
                 Render3D.init();
             }
             localState = Array(size).fill().map(()=>Array(size).fill().map(()=>Array(size).fill(0)));
@@ -199,28 +208,18 @@
             if (mode !== '2D') Render3D.sync(localState);
         }
 
-        // ================= 单机 AI 模式启动 =================
         async function startGameAI(color) {
-            myColor = color;
-            currentTurn = 1;
-            isGameOver = false;
+            myColor = color; currentTurn = 1; isGameOver = false;
             setupBaseUI();
-
             document.getElementById('pauseBtn').classList.remove('hidden');
             document.getElementById('undoBtn').classList.remove('hidden');
             document.getElementById('roomInfoTop').classList.add('hidden');
-
             await API.init(mode);
             if (myColor === 1) startTimer(60); else startAIWait(1);
         }
 
-        // ================= 联机 PvP 模式启动与 WebSocket =================
-        function startGamePvP() {
-            let roomId = document.getElementById('roomInput').value.trim();
-            if (!roomId) roomId = Math.floor(1000 + Math.random() * 9000).toString();
-
+        function startGamePvP(roomId) {
             setupBaseUI();
-
             document.getElementById('pauseBtn').classList.add('hidden');
             document.getElementById('undoBtn').classList.add('hidden');
             document.getElementById('roomInfoTop').classList.remove('hidden');
@@ -233,53 +232,37 @@
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(`${protocol}//${window.location.host}/ws/pvp/${roomId}/${mode}`);
 
+            ws.onerror = function() {
+                alert("无法连接到游戏服务器！请确保 Python 后端正在运行。");
+                location.reload();
+            };
+
             ws.onmessage = function(event) {
                 const data = JSON.parse(event.data);
-
-                if (data.type === "error") {
-                    alert(data.msg);
-                    location.reload();
-                }
-                else if (data.type === "connected") {
-                    myColor = data.color;
-                    console.log(data.msg);
-                }
+                if (data.type === "error") { alert(data.msg); location.reload(); }
+                else if (data.type === "connected") { myColor = data.color; }
                 else if (data.type === "start") {
                     document.getElementById('waitingOverlay').classList.add('hidden');
-                    isGameOver = false;
-                    currentTurn = data.turn;
-                    updatePvPStatus();
+                    isGameOver = false; currentTurn = data.turn; updatePvPStatus();
                 }
                 else if (data.type === "update") {
-                    localState = data.state;
-                    lastMove = data.lastMove;
-                    currentTurn = data.turn;
-
+                    localState = data.state; lastMove = data.lastMove; currentTurn = data.turn;
                     if (mode !== '2D') {
-                        currentZ = lastMove.z;
-                        document.getElementById('zSlider').value = currentZ;
+                        currentZ = lastMove.z; document.getElementById('zSlider').value = currentZ;
                         document.getElementById('zLabel').innerText = `当前深度 Z = ${currentZ}`;
                     }
-
-                    render2DGrid();
-                    if (mode !== '2D') Render3D.sync(localState);
-
-                    if (mode === '3D_MELT') {
-                        document.getElementById('scoreText').innerText = `融解得分 >> 黑: ${data.scores['1']}/5 | 白: ${data.scores['-1']}/5`;
-                    }
-
+                    render2DGrid(); if (mode !== '2D') Render3D.sync(localState);
+                    if (mode === '3D_MELT') document.getElementById('scoreText').innerText = `融解得分 >> 黑: ${data.scores['1']}/5 | 白: ${data.scores['-1']}/5`;
                     if (data.isWin) {
                         isGameOver = true;
                         let winnerStr = data.winner === myColor ? "胜利！" : "失败...";
                         document.getElementById('statusText').innerText = `游戏结束！您${winnerStr}`;
                         setTimeout(() => alert(data.winner === myColor ? "恭喜，您在联机对战中获胜！" : "很遗憾，您输给了对手。"), 200);
-                    } else {
-                        updatePvPStatus();
-                    }
+                    } else updatePvPStatus();
                 }
                 else if (data.type === "opponent_left") {
                     isGameOver = true;
-                    alert("对手已掉线或离开房间！");
+                    alert("对手已断开连接！游戏结束。");
                     location.reload();
                 }
             };
@@ -296,31 +279,22 @@
             }
         }
 
-        // ================= 核心操作逻辑 =================
         async function onPlayerClick(x, y) {
             if (isGameOver || isPaused || currentTurn !== myColor) return;
-
-            if (gameType === 'PVP') {
-                ws.send(JSON.stringify({ action: "play", x: x, y: y, z: currentZ }));
-            } else {
+            if (gameType === 'PVP') ws.send(JSON.stringify({ action: "play", x: x, y: y, z: currentZ }));
+            else {
                 const res = await API.play(x, y, currentZ, myColor);
                 if (res.success) handleMoveResultAI(res, myColor);
             }
         }
 
         function handleMoveResultAI(res, player) {
-            localState = res.state;
-            lastMove = res.lastMove;
-            render2DGrid();
-            if (mode !== '2D') Render3D.sync(localState);
-
-            if (mode === '3D_MELT') {
-                document.getElementById('scoreText').innerText = `融解得分 >> 黑: ${res.scores['1']}/5 | 白: ${res.scores['-1']}/5`;
-            }
+            localState = res.state; lastMove = res.lastMove;
+            render2DGrid(); if (mode !== '2D') Render3D.sync(localState);
+            if (mode === '3D_MELT') document.getElementById('scoreText').innerText = `融解得分 >> 黑: ${res.scores['1']}/5 | 白: ${res.scores['-1']}/5`;
 
             if (res.isWin) {
-                isGameOver = true;
-                clearInterval(timerObj); clearInterval(aiWaitObj);
+                isGameOver = true; clearInterval(timerObj); clearInterval(aiWaitObj);
                 document.getElementById('statusText').innerText = `${player === myColor ? '玩家' : 'AI'} 获胜！`;
                 setTimeout(() => alert("游戏结束！"), 100);
             } else {
@@ -332,14 +306,12 @@
         function changeZ(val) {
             currentZ = parseInt(val);
             document.getElementById('zLabel').innerText = `当前深度 Z = ${currentZ}`;
-            render2DGrid();
-            if (mode !== '2D') Render3D.highlightLayer(currentZ);
+            render2DGrid(); if (mode !== '2D') Render3D.highlightLayer(currentZ);
         }
 
         function render2DGrid() {
             const grid = document.getElementById('grid2d');
-            grid.innerHTML = '';
-            grid.style.gridTemplateColumns = `repeat(${size}, minmax(0, 1fr))`;
+            grid.innerHTML = ''; grid.style.gridTemplateColumns = `repeat(${size}, minmax(0, 1fr))`;
             let pxSize = mode === '2D' ? '600px' : '350px';
             grid.style.width = pxSize; grid.style.height = pxSize;
 
@@ -353,9 +325,7 @@
                     if (p !== 0) {
                         const pDiv = document.createElement('div');
                         pDiv.className = `w-[85%] h-[85%] rounded-full ${p===1?'piece-black':(p===-1?'piece-white':'piece-rock')}`;
-                        if (lastMove && lastMove.x === x && lastMove.y === y && lastMove.z === (mode==='2D'?0:currentZ) && p !== 2) {
-                            pDiv.classList.add('highlight-last');
-                        }
+                        if (lastMove && lastMove.x === x && lastMove.y === y && lastMove.z === (mode==='2D'?0:currentZ) && p !== 2) pDiv.classList.add('highlight-last');
                         cell.appendChild(pDiv);
                     }
                     grid.appendChild(cell);
@@ -363,67 +333,41 @@
             }
         }
 
-        // ================= 定时器与控制 =================
         function togglePause() {
             if (isGameOver || gameType === 'PVP') return;
-            const btn = document.getElementById('pauseBtn');
-            const overlay = document.getElementById('pauseOverlay');
-
+            const btn = document.getElementById('pauseBtn'), overlay = document.getElementById('pauseOverlay');
             if (isPaused) {
-                isPaused = false;
-                overlay.classList.add('hidden');
-                btn.innerText = '暂停';
-                btn.classList.replace('bg-emerald-600', 'bg-yellow-600');
-                btn.classList.replace('hover:bg-emerald-500', 'hover:bg-yellow-500');
-                if (pausedTurn === 'HUMAN') startTimer(timeLeft);
-                else if (pausedTurn === 'AI') startAIWait(aiWaitLeft);
+                isPaused = false; overlay.classList.add('hidden');
+                btn.innerText = '暂停'; btn.classList.replace('bg-emerald-600', 'bg-yellow-600'); btn.classList.replace('hover:bg-emerald-500', 'hover:bg-yellow-500');
+                if (pausedTurn === 'HUMAN') startTimer(timeLeft); else if (pausedTurn === 'AI') startAIWait(aiWaitLeft);
             } else {
-                isPaused = true;
-                overlay.classList.remove('hidden');
-                btn.innerText = '▶ 继续';
-                btn.classList.replace('bg-yellow-600', 'bg-emerald-600');
-                btn.classList.replace('hover:bg-yellow-500', 'hover:bg-emerald-500');
-                clearInterval(timerObj); clearInterval(aiWaitObj);
-                pausedTurn = currentTurn === myColor ? 'HUMAN' : 'AI';
+                isPaused = true; overlay.classList.remove('hidden');
+                btn.innerText = '▶ 继续'; btn.classList.replace('bg-yellow-600', 'bg-emerald-600'); btn.classList.replace('hover:bg-yellow-500', 'hover:bg-emerald-500');
+                clearInterval(timerObj); clearInterval(aiWaitObj); pausedTurn = currentTurn === myColor ? 'HUMAN' : 'AI';
             }
         }
 
         function startTimer(initialTime) {
-            clearInterval(timerObj); clearInterval(aiWaitObj);
-            timeLeft = initialTime;
-            document.getElementById('statusText').innerText = "您的回合 (请落子)";
-            document.getElementById('statusText').className = "text-sm font-bold text-emerald-400";
-
+            clearInterval(timerObj); clearInterval(aiWaitObj); timeLeft = initialTime;
+            document.getElementById('statusText').innerText = "您的回合 (请落子)"; document.getElementById('statusText').className = "text-sm font-bold text-emerald-400";
             timerObj = setInterval(() => {
                 if(isPaused) return;
                 document.getElementById('timerText').innerText = `${--timeLeft}s`;
-                if (timeLeft <= 0) {
-                    clearInterval(timerObj);
-                    document.getElementById('statusText').innerText = "超时代下...";
-                    API.aiPlay(myColor).then(res => handleMoveResultAI(res, myColor));
-                }
+                if (timeLeft <= 0) { clearInterval(timerObj); document.getElementById('statusText').innerText = "超时代下..."; API.aiPlay(myColor).then(res => handleMoveResultAI(res, myColor)); }
             }, 1000);
         }
 
         let aiWaitLeft = 5;
         function startAIWait(initialTime) {
-            clearInterval(timerObj); clearInterval(aiWaitObj);
-            aiWaitLeft = initialTime;
+            clearInterval(timerObj); clearInterval(aiWaitObj); aiWaitLeft = initialTime;
             document.getElementById('timerText').innerText = "--";
-
             aiWaitObj = setInterval(() => {
                 if(isPaused) return;
-                document.getElementById('statusText').innerText = `等待 AI 落子... (${--aiWaitLeft}s)`;
-                document.getElementById('statusText').className = "text-sm font-bold text-orange-400 animate-pulse";
+                document.getElementById('statusText').innerText = `等待 AI 落子... (${--aiWaitLeft}s)`; document.getElementById('statusText').className = "text-sm font-bold text-orange-400 animate-pulse";
                 if (aiWaitLeft <= 0) {
-                    clearInterval(aiWaitObj);
-                    document.getElementById('statusText').innerText = "AI 云端矩阵算力全开中...";
+                    clearInterval(aiWaitObj); document.getElementById('statusText').innerText = "AI 云端矩阵算力全开中...";
                     API.aiPlay(-myColor).then(res => {
-                        if (mode !== '2D' && res.move) {
-                            currentZ = res.move.z;
-                            document.getElementById('zSlider').value = currentZ;
-                            changeZ(currentZ);
-                        }
+                        if (mode !== '2D' && res.move) { currentZ = res.move.z; document.getElementById('zSlider').value = currentZ; changeZ(currentZ); }
                         handleMoveResultAI(res, -myColor);
                     });
                 }
@@ -434,30 +378,15 @@
             if (isGameOver || isPaused || gameType === 'PVP') return;
             if (currentTurn !== myColor) {
                 const res = await API.undo();
-                if (res.success) {
-                    localState = res.state; lastMove = res.lastMove;
-                    currentTurn = myColor;
-                    render2DGrid();
-                    if (mode !== '2D') Render3D.sync(localState);
-                    startTimer(60);
-                }
+                if (res.success) { localState = res.state; lastMove = res.lastMove; currentTurn = myColor; render2DGrid(); if (mode !== '2D') Render3D.sync(localState); startTimer(60); }
             } else {
-                await API.undo();
-                const res = await API.undo();
-                if (res.success) {
-                    localState = res.state; lastMove = res.lastMove;
-                    render2DGrid();
-                    if (mode !== '2D') Render3D.sync(localState);
-                    startTimer(60);
-                }
+                await API.undo(); const res = await API.undo();
+                if (res.success) { localState = res.state; lastMove = res.lastMove; render2DGrid(); if (mode !== '2D') Render3D.sync(localState); startTimer(60); }
             }
         }
 
-        // ================= Three.js 渲染 =================
         const Render3D = {
-            scene: null, camera: null, renderer: null, controls: null,
-            pieceGroup: null, layerGroup: null, lastMoveRing: null, SPACING: 1.2,
-
+            scene: null, camera: null, renderer: null, controls: null, pieceGroup: null, layerGroup: null, lastMoveRing: null, SPACING: 1.2,
             init() {
                 if (this.scene) return;
                 const container = document.getElementById('canvas3d');
@@ -473,36 +402,23 @@
                 this.controls.enableDamping = true;
 
                 this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-                const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-                dirLight.position.set(10, 20, 10);
-                this.scene.add(dirLight);
+                const dirLight = new THREE.DirectionalLight(0xffffff, 0.8); dirLight.position.set(10, 20, 10); this.scene.add(dirLight);
 
-                this.pieceGroup = new THREE.Group();
-                this.layerGroup = new THREE.Group();
-                this.scene.add(this.pieceGroup);
-                this.scene.add(this.layerGroup);
+                this.pieceGroup = new THREE.Group(); this.layerGroup = new THREE.Group();
+                this.scene.add(this.pieceGroup); this.scene.add(this.layerGroup);
 
                 const offset = (size - 1) * this.SPACING / 2;
-                const axesLength = size * this.SPACING + 2;
-                const axesHelper = new THREE.AxesHelper(axesLength);
-                axesHelper.position.set(-offset, -offset, -offset);
-                this.scene.add(axesHelper);
+                const axesHelper = new THREE.AxesHelper(size * this.SPACING + 2); axesHelper.position.set(-offset, -offset, -offset); this.scene.add(axesHelper);
 
-                this.drawGrid();
-                this.highlightLayer(currentZ);
+                this.drawGrid(); this.highlightLayer(currentZ);
 
                 const animate = () => {
-                    requestAnimationFrame(animate);
-                    this.controls.update();
-                    if (this.lastMoveRing && !isPaused) {
-                        this.lastMoveRing.rotation.z += 0.03;
-                        this.lastMoveRing.scale.setScalar(1 + Math.sin(Date.now()*0.005)*0.1);
-                    }
+                    requestAnimationFrame(animate); this.controls.update();
+                    if (this.lastMoveRing && !isPaused) { this.lastMoveRing.rotation.z += 0.03; this.lastMoveRing.scale.setScalar(1 + Math.sin(Date.now()*0.005)*0.1); }
                     this.renderer.render(this.scene, this.camera);
                 };
                 animate();
             },
-
             drawGrid() {
                 const mat = new THREE.LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.3 });
                 const offset = (size - 1) * this.SPACING / 2;
@@ -515,52 +431,35 @@
                     }
                 }
             },
-
             sync(state) {
                 while(this.pieceGroup.children.length > 0) this.pieceGroup.remove(this.pieceGroup.children[0]);
                 const offset = (size - 1) * this.SPACING / 2;
-
                 for (let z=0; z<size; z++) {
                     for (let y=0; y<size; y++) {
                         for (let x=0; x<size; x++) {
                             const p = state[z][y][x];
                             if (p !== 0) {
                                 let geo, mat;
-                                if (p === 2) {
-                                    geo = new THREE.BoxGeometry(this.SPACING*0.6, this.SPACING*0.6, this.SPACING*0.6);
-                                    mat = new THREE.MeshStandardMaterial({ color: 0x6b7280 });
-                                } else {
-                                    geo = new THREE.SphereGeometry(this.SPACING*0.4, 32, 32);
-                                    mat = new THREE.MeshStandardMaterial({ color: p===1?0x111111:0xffffff, roughness: 0.2, metalness: p===1?0.8:0.1 });
-                                }
-                                const mesh = new THREE.Mesh(geo, mat);
-                                mesh.position.set(x*this.SPACING - offset, (z*this.SPACING - offset), y*this.SPACING - offset);
-                                this.pieceGroup.add(mesh);
+                                if (p === 2) { geo = new THREE.BoxGeometry(this.SPACING*0.6, this.SPACING*0.6, this.SPACING*0.6); mat = new THREE.MeshStandardMaterial({ color: 0x6b7280 }); }
+                                else { geo = new THREE.SphereGeometry(this.SPACING*0.4, 32, 32); mat = new THREE.MeshStandardMaterial({ color: p===1?0x111111:0xffffff, roughness: 0.2, metalness: p===1?0.8:0.1 }); }
+                                const mesh = new THREE.Mesh(geo, mat); mesh.position.set(x*this.SPACING - offset, (z*this.SPACING - offset), y*this.SPACING - offset); this.pieceGroup.add(mesh);
                             }
                         }
                     }
                 }
-
                 if (this.lastMoveRing) this.scene.remove(this.lastMoveRing);
                 if (lastMove && state[lastMove.z][lastMove.y][lastMove.x] !== 2) {
                     const geo = new THREE.RingGeometry(this.SPACING*0.5, this.SPACING*0.6, 32);
                     const mat = new THREE.MeshBasicMaterial({ color: 0xef4444, side: THREE.DoubleSide });
                     this.lastMoveRing = new THREE.Mesh(geo, mat);
                     this.lastMoveRing.position.set(lastMove.x*this.SPACING - offset, (lastMove.z*this.SPACING - offset) + 0.05, lastMove.y*this.SPACING - offset);
-                    this.lastMoveRing.rotation.x = Math.PI / 2;
-                    this.scene.add(this.lastMoveRing);
+                    this.lastMoveRing.rotation.x = Math.PI / 2; this.scene.add(this.lastMoveRing);
                 }
             },
-
             highlightLayer(z) {
                 while(this.layerGroup.children.length > 0) this.layerGroup.remove(this.layerGroup.children[0]);
-                const plane = new THREE.Mesh(
-                    new THREE.PlaneGeometry(size * this.SPACING, size * this.SPACING),
-                    new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.15, side: THREE.DoubleSide })
-                );
-                plane.rotation.x = Math.PI / 2;
-                plane.position.y = (z * this.SPACING - (size - 1) * this.SPACING / 2);
-                this.layerGroup.add(plane);
+                const plane = new THREE.Mesh(new THREE.PlaneGeometry(size * this.SPACING, size * this.SPACING), new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.15, side: THREE.DoubleSide }));
+                plane.rotation.x = Math.PI / 2; plane.position.y = (z * this.SPACING - (size - 1) * this.SPACING / 2); this.layerGroup.add(plane);
             }
         };
     </script>
