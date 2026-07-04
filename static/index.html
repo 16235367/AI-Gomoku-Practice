@@ -23,6 +23,31 @@
 </head>
 <body class="h-screen w-screen relative">
 
+    <div class="fixed bottom-6 right-6 z-[100]">
+        <div class="relative group">
+            <div id="bgmMenu" class="hidden absolute bottom-full right-0 mb-4 w-48 glass rounded-2xl overflow-hidden shadow-2xl border border-white/20 flex flex-col transition-all origin-bottom-right">
+                <div class="bg-slate-800/50 py-2 px-4 text-xs font-bold text-slate-400 border-b border-white/10">选择背景音乐</div>
+                <button onclick="playBgm('static/bgm/track1.mp3', this)" class="bgm-option px-4 py-3 text-left hover:bg-blue-500/50 text-sm font-bold transition flex items-center justify-between">
+                    <span>🎵 舒缓琴音</span><span class="text-blue-400 hidden indicator">▶</span>
+                </button>
+                <button onclick="playBgm('static/bgm/track2.mp3', this)" class="bgm-option px-4 py-3 text-left hover:bg-purple-500/50 text-sm font-bold transition flex items-center justify-between">
+                    <span>🎵 得吃小曲</span><span class="text-purple-400 hidden indicator">▶</span>
+                </button>
+                <button onclick="playBgm('static/bgm/track3.mp3', this)" class="bgm-option px-4 py-3 text-left hover:bg-yellow-500/50 text-sm font-bold transition flex items-center justify-between">
+                    <span>🎵 欢乐斗地主</span><span class="text-yellow-400 hidden indicator">▶</span>
+                </button>
+                <div class="h-px bg-white/20 my-1"></div>
+                <button onclick="stopBgm()" class="px-4 py-3 text-left hover:bg-red-500/50 text-sm font-bold text-red-300 transition">🔇 关闭音乐</button>
+            </div>
+
+            <button onclick="toggleBgmMenu()" id="bgmBtn" class="glass w-14 h-14 rounded-full hover:bg-white/20 transition shadow-[0_0_20px_rgba(0,0,0,0.5)] flex items-center justify-center border border-white/30 text-white">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                </svg>
+            </button>
+        </div>
+    </div>
+
     <div id="mainMenu" class="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-900">
         <h1 class="text-6xl font-black mb-12 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500">全维度五子棋合集</h1>
         <div class="flex flex-col space-y-6 w-80">
@@ -88,8 +113,7 @@
     <div id="historyModal" class="hidden absolute inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur">
         <div class="glass p-8 rounded-2xl w-[500px] border border-white/20 shadow-2xl">
             <h2 class="text-2xl font-bold mb-6 text-yellow-400 text-center">排行榜 (Top 10)</h2>
-            <div class="bg-slate-800 rounded-lg p-4 max-h-64 overflow-y-auto" id="historyList">
-                </div>
+            <div class="bg-slate-800 rounded-lg p-4 max-h-64 overflow-y-auto" id="historyList"></div>
             <button onclick="document.getElementById('historyModal').classList.add('hidden')" class="mt-6 w-full py-3 bg-slate-700 hover:bg-slate-600 rounded-xl font-bold transition text-white">关闭</button>
         </div>
     </div>
@@ -161,6 +185,64 @@
     </div>
 
     <script>
+        // ================= ★ BGM 音乐控制器逻辑 ★ =================
+        let bgmAudio = null;
+        let isBgmMenuOpen = false;
+
+        function toggleBgmMenu() {
+            const menu = document.getElementById('bgmMenu');
+            isBgmMenuOpen = !isBgmMenuOpen;
+            if (isBgmMenuOpen) {
+                menu.classList.remove('hidden');
+            } else {
+                menu.classList.add('hidden');
+            }
+        }
+
+        function playBgm(src, btnElement) {
+            if (bgmAudio) {
+                bgmAudio.pause();
+                bgmAudio.currentTime = 0;
+            }
+            bgmAudio = new Audio(src);
+            bgmAudio.loop = true;
+            bgmAudio.volume = 0.4; // 默认中等音量
+
+            // 使用 Promise 异步处理播放请求
+            let playPromise = bgmAudio.play();
+
+            if (playPromise !== undefined) {
+                playPromise.then(_ => {
+                    // 播放成功，更新图标动画
+                    document.getElementById('bgmBtn').classList.add('animate-bounce', 'text-cyan-400');
+                    document.getElementById('bgmBtn').classList.remove('text-white');
+                    document.querySelectorAll('.bgm-option .indicator').forEach(el => el.classList.add('hidden'));
+                    btnElement.querySelector('.indicator').classList.remove('hidden');
+                    toggleBgmMenu();
+                }).catch(error => {
+                    // 播放被浏览器拦截，静默失败，不再弹窗打扰用户
+                    console.log("浏览器安全策略拦截了音频播放，等待用户下一次点击", error);
+                    // 可以让音乐按钮暂时变红，提示用户需要再次点击
+                    document.getElementById('bgmBtn').classList.add('text-red-400');
+                    setTimeout(() => {
+                        document.getElementById('bgmBtn').classList.remove('text-red-400');
+                    }, 2000);
+                });
+            }
+        }
+
+        function stopBgm() {
+            if (bgmAudio) {
+                bgmAudio.pause();
+                bgmAudio = null;
+            }
+            document.getElementById('bgmBtn').classList.remove('animate-bounce', 'text-cyan-400');
+            document.getElementById('bgmBtn').classList.add('text-white');
+            document.querySelectorAll('.bgm-option .indicator').forEach(el => el.classList.add('hidden'));
+            toggleBgmMenu();
+        }
+
+
         let gameType = 'AI', mode = '2D', size = 15, currentZ = 0, myColor = 1, currentTurn = 1;
         let isGameOver = false, timerObj, aiWaitObj, timeLeft = 60, isPaused = false, pausedTurn = null, ws = null;
         let localState = null, lastMove = null;
@@ -176,7 +258,6 @@
         function openColorModal() { gameType = 'AI'; document.getElementById('opponentModal').classList.add('hidden'); document.getElementById('colorModal').classList.remove('hidden'); }
         function openRoomModal() { gameType = 'PVP'; document.getElementById('opponentModal').classList.add('hidden'); document.getElementById('roomModal').classList.remove('hidden'); }
 
-        // ★ 贪吃蛇菜单导航 ★
         function openSnakeModal() { mode = 'SNAKE'; document.getElementById('snakeModal').classList.remove('hidden'); }
 
         async function showSnakeHistory() {
@@ -232,7 +313,7 @@
                 document.getElementById('timerText').classList.add('hidden');
                 gridContainer.classList.add('items-center');
                 gridContainer.classList.remove('items-start', 'pt-16');
-                return; // 贪吃蛇不需要初始化后端的五子棋状态
+                return;
             }
 
             let prefix = gameType === 'PVP' ? '[联机PvP] ' : '[单机AI] ';
@@ -264,7 +345,6 @@
             if (mode !== '2D') Render3D.sync(localState);
         }
 
-        // ================= ★ 贪吃蛇核心引擎 ★ =================
         const SnakeEngine = {
             timer: null, speedLevel: 1, speedMs: 500, score: 0,
             snake: [], food: null, dir: {x: 1, y: 0}, nextDir: {x: 1, y: 0},
@@ -272,10 +352,9 @@
 
             start(speed) {
                 this.speedLevel = parseInt(speed);
-                // 档位速度映射：1档500ms, 2档400ms, ..., 5档100ms
                 this.speedMs = 600 - this.speedLevel * 100;
                 this.score = 0;
-                this.snake = [{x: 7, y: 7}, {x: 6, y: 7}, {x: 5, y: 7}]; // 初始3个身体
+                this.snake = [{x: 7, y: 7}, {x: 6, y: 7}, {x: 5, y: 7}];
                 this.dir = {x: 1, y: 0};
                 this.nextDir = {x: 1, y: 0};
                 this.isPaused = false;
@@ -284,7 +363,6 @@
                 this.spawnFood();
                 this.updateUI();
 
-                // 绑定全局键盘事件
                 document.addEventListener('keydown', this.handleKey);
                 this.resume();
             },
@@ -300,7 +378,6 @@
             },
 
             handleKey(e) {
-                // 阻止方向键滚动屏幕
                 if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
                 if(SnakeEngine.isPaused || !SnakeEngine.isPlaying) return;
 
@@ -317,19 +394,17 @@
                 const nx = head.x + this.dir.x;
                 const ny = head.y + this.dir.y;
 
-                // 碰撞检测
                 if (nx < 0 || nx >= 15 || ny < 0 || ny >= 15) return this.gameOver("撞到边界了！");
                 if (this.snake.some(s => s.x === nx && s.y === ny)) return this.gameOver("咬到自己了！");
 
-                this.snake.unshift({x: nx, y: ny}); // 增加新头部
+                this.snake.unshift({x: nx, y: ny});
 
-                // 吃食物判定
                 if (nx === this.food.x && ny === this.food.y) {
                     this.score += 100;
                     this.updateUI();
                     this.spawnFood();
                 } else {
-                    this.snake.pop(); // 没吃到则移除尾部，保持长度
+                    this.snake.pop();
                 }
                 this.render();
             },
@@ -351,7 +426,7 @@
 
                         if (isHead) {
                             const pDiv = document.createElement('div');
-                            pDiv.className = 'w-[85%] h-[85%] rounded-full piece-black highlight-last'; // 蛇头加红框高亮
+                            pDiv.className = 'w-[85%] h-[85%] rounded-full piece-black highlight-last';
                             cell.appendChild(pDiv);
                         } else if (isBody) {
                             const pDiv = document.createElement('div');
@@ -359,7 +434,7 @@
                             cell.appendChild(pDiv);
                         } else if (isFood) {
                             const pDiv = document.createElement('div');
-                            pDiv.className = 'w-[85%] h-[85%] rounded-full piece-white shadow-[0_0_15px_rgba(255,255,255,0.8)]'; // 食物加白色发光
+                            pDiv.className = 'w-[85%] h-[85%] rounded-full piece-white shadow-[0_0_15px_rgba(255,255,255,0.8)]';
                             cell.appendChild(pDiv);
                         }
                         grid.appendChild(cell);
@@ -373,14 +448,13 @@
 
             async gameOver(reason) {
                 this.stop();
-                // 向后端记录分数
                 await fetch('/api/snake/record', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({speed: this.speedLevel, score: this.score})
                 });
                 alert(`贪吃蛇游戏结束！\n原因: ${reason}\n难度: ${this.speedLevel} 档\n最终得分: ${this.score} 分`);
-                showSnakeHistory(); // 游戏结束后自动弹出历史战绩供查阅
+                showSnakeHistory();
             },
 
             updateUI() {
@@ -396,7 +470,6 @@
             SnakeEngine.start(speed);
         }
 
-        // ================= 其他五子棋逻辑 =================
         async function startGameAI(color) {
             myColor = color; currentTurn = 1; isGameOver = false;
             setupBaseUI();
@@ -463,7 +536,7 @@
         }
 
         async function onPlayerClick(x, y) {
-            if (mode === 'SNAKE' || isGameOver || isPaused || currentTurn !== myColor) return; // 贪吃蛇禁用点击
+            if (mode === 'SNAKE' || isGameOver || isPaused || currentTurn !== myColor) return;
             if (gameType === 'PVP') ws.send(JSON.stringify({ action: "play", x: x, y: y, z: currentZ }));
             else {
                 const res = await API.play(x, y, currentZ, myColor);
@@ -492,7 +565,7 @@
         }
 
         function render2DGrid() {
-            if (mode === 'SNAKE') return; // 贪吃蛇有自己的专属渲染循环
+            if (mode === 'SNAKE') return;
             const grid = document.getElementById('grid2d');
             grid.innerHTML = ''; grid.style.gridTemplateColumns = `repeat(${size}, minmax(0, 1fr))`;
             let pxSize = mode === '2D' ? '600px' : '350px';
@@ -520,7 +593,6 @@
             if (isGameOver || gameType === 'PVP') return;
             const btn = document.getElementById('pauseBtn'), overlay = document.getElementById('pauseOverlay');
 
-            // ★ 贪吃蛇独立暂停逻辑 ★
             if (mode === 'SNAKE') {
                 if (SnakeEngine.isPaused) {
                     SnakeEngine.resume(); overlay.classList.add('hidden');
@@ -581,7 +653,6 @@
             }
         }
 
-        // ================= Three.js 渲染 =================
         const Render3D = {
             scene: null, camera: null, renderer: null, controls: null, pieceGroup: null, layerGroup: null, lastMoveRing: null, SPACING: 1.2,
             init() {
