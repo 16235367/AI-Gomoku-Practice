@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>全维度五子棋 (单机 AI / 联机 PvP)</title>
+    <title>全维度五子棋 (含贪吃蛇模式)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
@@ -23,17 +23,16 @@
 </head>
 <body class="h-screen w-screen relative">
 
-    <!-- 主菜单 -->
     <div id="mainMenu" class="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-900">
         <h1 class="text-6xl font-black mb-12 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500">全维度五子棋合集</h1>
         <div class="flex flex-col space-y-6 w-80">
             <button onclick="openOpponentModal('2D')" class="glass-btn py-4 rounded-xl text-xl font-bold text-emerald-400">▶ 经典 2D 模式</button>
             <button onclick="openOpponentModal('3D_NORMAL')" class="glass-btn py-4 rounded-xl text-xl font-bold text-blue-400">▶ 标准 3D 模式</button>
             <button onclick="openOpponentModal('3D_MELT')" class="glass-btn py-4 rounded-xl text-xl font-bold text-purple-400">▶ 融解 3D 模式</button>
+            <button onclick="openSnakeModal()" class="glass-btn py-4 rounded-xl text-xl font-bold text-yellow-400 border-yellow-500/30">▶ 贪吃蛇挑战</button>
         </div>
     </div>
 
-    <!-- 弹窗 1：选择对战类型 -->
     <div id="opponentModal" class="hidden absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur">
         <div class="glass p-8 rounded-2xl w-96 border border-white/20 shadow-2xl">
             <h2 class="text-2xl font-bold text-center mb-8">选择对战类型</h2>
@@ -45,7 +44,6 @@
         </div>
     </div>
 
-    <!-- 弹窗 2：单机选色 -->
     <div id="colorModal" class="hidden absolute inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur">
         <div class="glass p-8 rounded-2xl w-96 border border-white/20 shadow-2xl">
             <h2 class="text-2xl font-bold text-center mb-8">选择您的阵营</h2>
@@ -57,34 +55,51 @@
         </div>
     </div>
 
-    <!-- 弹窗 3：联机开房 -->
     <div id="roomModal" class="hidden absolute inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur">
         <div class="glass p-8 rounded-2xl w-96 border border-white/20 shadow-2xl text-center">
             <h2 class="text-2xl font-bold mb-6 text-purple-400">联机真人 PvP</h2>
-
             <button onclick="createRoom()" class="w-full bg-purple-600 hover:bg-purple-500 py-3 rounded-xl font-bold transition text-lg mb-6 shadow-[0_0_15px_rgba(147,51,234,0.3)]">建个新房间</button>
-
             <div class="flex items-center mb-6">
-                <div class="flex-1 h-px bg-slate-600"></div>
-                <span class="px-3 text-slate-400 text-sm">或者加入已有房间</span>
-                <div class="flex-1 h-px bg-slate-600"></div>
+                <div class="flex-1 h-px bg-slate-600"></div><span class="px-3 text-slate-400 text-sm">或者加入已有房间</span><div class="flex-1 h-px bg-slate-600"></div>
             </div>
-
             <input type="text" id="roomInput" placeholder="输入4位房间号" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 mb-4 text-center text-xl text-white outline-none focus:border-purple-500 transition" onkeypress="handleEnter(event)">
             <button onclick="joinRoom()" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold transition text-lg">加入房间</button>
-
             <button onclick="document.getElementById('roomModal').classList.add('hidden')" class="mt-6 w-full py-2 text-slate-400 hover:text-white transition">返回</button>
         </div>
     </div>
 
-    <!-- 联机等待遮罩 -->
+    <div id="snakeModal" class="hidden absolute inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur">
+        <div class="glass p-8 rounded-2xl w-96 border border-white/20 shadow-2xl text-center">
+            <h2 class="text-2xl font-bold mb-6 text-yellow-400">贪吃蛇挑战模式</h2>
+            <div class="mb-8">
+                <div class="flex justify-between text-sm font-bold text-slate-300 mb-2">
+                    <span>1 档 (最慢)</span>
+                    <span id="speedLabel" class="text-yellow-400">速度: 3 档</span>
+                    <span>5 档 (最快)</span>
+                </div>
+                <input type="range" id="speedSlider" min="1" max="5" value="3" oninput="document.getElementById('speedLabel').innerText='速度: '+this.value+' 档'">
+            </div>
+            <button onclick="startSnakeGame()" class="w-full bg-yellow-600 hover:bg-yellow-500 py-4 rounded-xl font-bold text-lg mb-4 shadow-[0_0_15px_rgba(202,138,4,0.5)]">开始挑战</button>
+            <button onclick="showSnakeHistory()" class="w-full bg-slate-700 hover:bg-slate-600 py-3 rounded-xl font-bold text-white transition mb-6">查看历史排行榜</button>
+            <button onclick="document.getElementById('snakeModal').classList.add('hidden')" class="w-full py-2 text-slate-400 hover:text-white transition">返回主菜单</button>
+        </div>
+    </div>
+
+    <div id="historyModal" class="hidden absolute inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur">
+        <div class="glass p-8 rounded-2xl w-[500px] border border-white/20 shadow-2xl">
+            <h2 class="text-2xl font-bold mb-6 text-yellow-400 text-center">排行榜 (Top 10)</h2>
+            <div class="bg-slate-800 rounded-lg p-4 max-h-64 overflow-y-auto" id="historyList">
+                </div>
+            <button onclick="document.getElementById('historyModal').classList.add('hidden')" class="mt-6 w-full py-3 bg-slate-700 hover:bg-slate-600 rounded-xl font-bold transition text-white">关闭</button>
+        </div>
+    </div>
+
     <div id="waitingOverlay" class="hidden absolute inset-0 z-40 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center">
         <div class="w-16 h-16 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mb-6"></div>
         <h1 class="text-4xl font-black text-white tracking-widest mb-4">等待对手加入...</h1>
         <p id="roomDisplayCode" class="text-2xl font-mono text-purple-400 bg-purple-900/50 px-6 py-2 rounded-lg border border-purple-500/30">房间号: ---</p>
     </div>
 
-    <!-- 游戏主界面 -->
     <div id="gameUI" class="hidden h-full flex-col">
         <header class="glass w-full p-4 flex justify-between items-center z-10 border-b border-slate-700">
             <div class="flex items-center space-x-6">
@@ -101,7 +116,7 @@
                 </div>
                 <button id="pauseBtn" onclick="togglePause()" class="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg font-bold transition">暂停</button>
                 <button id="undoBtn" onclick="handleUndo()" class="px-5 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold">悔棋</button>
-                <button onclick="location.reload()" class="px-5 py-2 bg-red-600 hover:bg-red-500 rounded-lg font-bold">退出游戏</button>
+                <button onclick="returnToMenu()" class="px-5 py-2 bg-red-600 hover:bg-red-500 rounded-lg font-bold">退出</button>
             </div>
         </header>
 
@@ -109,13 +124,13 @@
             <div id="pauseOverlay" class="hidden absolute inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center">
                 <div class="text-center">
                     <h1 class="text-6xl font-black text-white tracking-widest mb-4">游戏已暂停</h1>
-                    <p class="text-xl text-slate-300">您可以自由旋转右侧 3D 空间进行战局分析</p>
+                    <p id="pauseTip" class="text-xl text-slate-300">您可以自由旋转右侧 3D 空间进行战局分析</p>
                 </div>
             </div>
 
             <aside id="panel2D" class="w-[450px] h-full glass border-r border-slate-700 flex flex-col z-10">
                 <div class="p-6 flex flex-col h-full">
-                    <h2 class="text-lg font-bold text-blue-400 mb-2">2D 战术落子区</h2>
+                    <h2 id="title2D" class="text-lg font-bold text-blue-400 mb-2">2D 战术落子区</h2>
                     <div id="zControl" class="mb-4">
                         <div class="flex justify-between text-xs font-bold text-slate-400 mb-1">
                             <span>◀ 0 (底层)</span>
@@ -125,7 +140,6 @@
                         <input type="range" id="zSlider" min="0" value="0" oninput="changeZ(this.value)">
                     </div>
 
-                    <!-- 回滚布局：保持 items-center justify-center 全局垂直水平居中 -->
                     <div id="gridContainer" class="flex-1 flex items-center justify-center relative">
                         <div class="relative pl-8 pt-8">
                             <div class="absolute top-2 left-8 right-0 flex items-center text-red-400 font-bold text-sm"><span>0</span> <div class="flex-1 h-px bg-red-400/50 mx-2"></div> <span>X 轴</span> <span class="ml-1">▶</span></div>
@@ -162,45 +176,87 @@
         function openColorModal() { gameType = 'AI'; document.getElementById('opponentModal').classList.add('hidden'); document.getElementById('colorModal').classList.remove('hidden'); }
         function openRoomModal() { gameType = 'PVP'; document.getElementById('opponentModal').classList.add('hidden'); document.getElementById('roomModal').classList.remove('hidden'); }
 
-        function handleEnter(e) { if (e.key === 'Enter') joinRoom(); }
+        // ★ 贪吃蛇菜单导航 ★
+        function openSnakeModal() { mode = 'SNAKE'; document.getElementById('snakeModal').classList.remove('hidden'); }
 
-        function createRoom() {
-            let roomId = Math.floor(1000 + Math.random() * 9000).toString();
-            startGamePvP(roomId);
+        async function showSnakeHistory() {
+            const res = await fetch('/api/snake/history');
+            const data = await res.json();
+            const list = document.getElementById('historyList');
+            list.innerHTML = '';
+            if (data.history.length === 0) {
+                list.innerHTML = '<div class="text-center text-slate-400 py-4">暂无挑战记录</div>';
+            } else {
+                data.history.forEach((record, index) => {
+                    const row = document.createElement('div');
+                    row.className = 'flex justify-between items-center bg-slate-700/50 p-3 mb-2 rounded border border-slate-600';
+                    row.innerHTML = `
+                        <div class="flex items-center"><span class="w-6 h-6 rounded bg-yellow-600 flex items-center justify-center text-sm font-bold mr-3">#${index+1}</span>
+                        <span class="text-slate-300">难度: ${record.speed} 档</span></div>
+                        <span class="font-bold text-yellow-400 text-lg">${record.score} 分</span>
+                    `;
+                    list.appendChild(row);
+                });
+            }
+            document.getElementById('historyModal').classList.remove('hidden');
         }
 
-        function joinRoom() {
-            let roomId = document.getElementById('roomInput').value.trim();
-            if (!roomId) { alert("请输入要加入的房间号！"); return; }
-            startGamePvP(roomId);
+        function handleEnter(e) { if (e.key === 'Enter') joinRoom(); }
+        function createRoom() { let roomId = Math.floor(1000 + Math.random() * 9000).toString(); startGamePvP(roomId); }
+        function joinRoom() { let roomId = document.getElementById('roomInput').value.trim(); if (!roomId) { alert("请输入要加入的房间号！"); return; } startGamePvP(roomId); }
+
+        function returnToMenu() {
+            if (mode === 'SNAKE') SnakeEngine.stop();
+            location.reload();
         }
 
         function setupBaseUI() {
             size = mode === '3D_NORMAL' ? 10 : 15;
-            currentZ = mode === '2D' ? 0 : Math.floor(size/2);
+            currentZ = mode === '2D' || mode === 'SNAKE' ? 0 : Math.floor(size/2);
+
             document.getElementById('mainMenu').classList.add('hidden');
             document.getElementById('colorModal').classList.add('hidden');
             document.getElementById('roomModal').classList.add('hidden');
+            document.getElementById('snakeModal').classList.add('hidden');
             document.getElementById('gameUI').classList.replace('hidden', 'flex');
+
+            const gridContainer = document.getElementById('gridContainer');
+
+            if (mode === 'SNAKE') {
+                document.getElementById('modeTitle').innerText = '[挑战] 贪吃蛇模式';
+                document.getElementById('title2D').innerText = '操控黑子(蛇) 吃掉白子(食物)';
+                document.getElementById('zControl').classList.add('hidden');
+                document.getElementById('canvas3d').classList.add('hidden');
+                document.getElementById('panel2D').classList.replace('w-[450px]', 'w-full');
+                document.getElementById('undoBtn').classList.add('hidden');
+                document.getElementById('timerText').classList.add('hidden');
+                gridContainer.classList.add('items-center');
+                gridContainer.classList.remove('items-start', 'pt-16');
+                return; // 贪吃蛇不需要初始化后端的五子棋状态
+            }
 
             let prefix = gameType === 'PVP' ? '[联机PvP] ' : '[单机AI] ';
             document.getElementById('modeTitle').innerText = prefix + mode;
+            document.getElementById('title2D').innerText = '2D 战术落子区';
             document.getElementById('zSlider').max = size - 1;
             document.getElementById('zMaxLabel').innerText = `${size - 1} (顶层) ▶`;
             document.getElementById('zSlider').value = currentZ;
             document.getElementById('zLabel').innerText = `当前深度 Z = ${currentZ}`;
 
-            // 恢复最初的完美居中布局逻辑，不再乱加 pt-16 等上移属性
             if (mode === '2D') {
                 document.getElementById('zControl').classList.add('hidden');
                 document.getElementById('canvas3d').classList.add('hidden');
                 document.getElementById('panel2D').classList.replace('w-[450px]', 'w-full');
+                gridContainer.classList.remove('items-center');
+                gridContainer.classList.add('items-center');
             } else {
                 document.getElementById('zControl').classList.remove('hidden');
                 document.getElementById('canvas3d').classList.remove('hidden');
                 document.getElementById('panel2D').classList.replace('w-full', 'w-[450px]');
                 document.getElementById('scoreBoard').classList.toggle('hidden', mode !== '3D_MELT');
                 document.getElementById('axesLegend').classList.remove('hidden');
+                gridContainer.classList.remove('items-start', 'pt-16');
+                gridContainer.classList.add('items-center');
                 Render3D.init();
             }
             localState = Array(size).fill().map(()=>Array(size).fill().map(()=>Array(size).fill(0)));
@@ -208,6 +264,139 @@
             if (mode !== '2D') Render3D.sync(localState);
         }
 
+        // ================= ★ 贪吃蛇核心引擎 ★ =================
+        const SnakeEngine = {
+            timer: null, speedLevel: 1, speedMs: 500, score: 0,
+            snake: [], food: null, dir: {x: 1, y: 0}, nextDir: {x: 1, y: 0},
+            isPaused: false, isPlaying: false,
+
+            start(speed) {
+                this.speedLevel = parseInt(speed);
+                // 档位速度映射：1档500ms, 2档400ms, ..., 5档100ms
+                this.speedMs = 600 - this.speedLevel * 100;
+                this.score = 0;
+                this.snake = [{x: 7, y: 7}, {x: 6, y: 7}, {x: 5, y: 7}]; // 初始3个身体
+                this.dir = {x: 1, y: 0};
+                this.nextDir = {x: 1, y: 0};
+                this.isPaused = false;
+                this.isPlaying = true;
+
+                this.spawnFood();
+                this.updateUI();
+
+                // 绑定全局键盘事件
+                document.addEventListener('keydown', this.handleKey);
+                this.resume();
+            },
+
+            spawnFood() {
+                let emptySpaces = [];
+                for(let y=0; y<15; y++){
+                    for(let x=0; x<15; x++){
+                        if(!this.snake.some(s => s.x === x && s.y === y)) emptySpaces.push({x, y});
+                    }
+                }
+                if(emptySpaces.length > 0) this.food = emptySpaces[Math.floor(Math.random() * emptySpaces.length)];
+            },
+
+            handleKey(e) {
+                // 阻止方向键滚动屏幕
+                if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+                if(SnakeEngine.isPaused || !SnakeEngine.isPlaying) return;
+
+                const d = SnakeEngine.dir;
+                if (e.key === 'ArrowUp' && d.y !== 1) SnakeEngine.nextDir = {x: 0, y: -1};
+                if (e.key === 'ArrowDown' && d.y !== -1) SnakeEngine.nextDir = {x: 0, y: 1};
+                if (e.key === 'ArrowLeft' && d.x !== 1) SnakeEngine.nextDir = {x: -1, y: 0};
+                if (e.key === 'ArrowRight' && d.x !== -1) SnakeEngine.nextDir = {x: 1, y: 0};
+            },
+
+            update() {
+                this.dir = this.nextDir;
+                const head = this.snake[0];
+                const nx = head.x + this.dir.x;
+                const ny = head.y + this.dir.y;
+
+                // 碰撞检测
+                if (nx < 0 || nx >= 15 || ny < 0 || ny >= 15) return this.gameOver("撞到边界了！");
+                if (this.snake.some(s => s.x === nx && s.y === ny)) return this.gameOver("咬到自己了！");
+
+                this.snake.unshift({x: nx, y: ny}); // 增加新头部
+
+                // 吃食物判定
+                if (nx === this.food.x && ny === this.food.y) {
+                    this.score += 100;
+                    this.updateUI();
+                    this.spawnFood();
+                } else {
+                    this.snake.pop(); // 没吃到则移除尾部，保持长度
+                }
+                this.render();
+            },
+
+            render() {
+                const grid = document.getElementById('grid2d');
+                grid.innerHTML = '';
+                grid.style.gridTemplateColumns = `repeat(15, minmax(0, 1fr))`;
+                grid.style.width = '600px'; grid.style.height = '600px';
+
+                for (let y = 0; y < 15; y++) {
+                    for (let x = 0; x < 15; x++) {
+                        const cell = document.createElement('div');
+                        cell.className = 'grid-cell w-full aspect-square border border-white/10 flex items-center justify-center';
+
+                        const isHead = this.snake[0].x === x && this.snake[0].y === y;
+                        const isBody = this.snake.some(s => s.x === x && s.y === y);
+                        const isFood = this.food && this.food.x === x && this.food.y === y;
+
+                        if (isHead) {
+                            const pDiv = document.createElement('div');
+                            pDiv.className = 'w-[85%] h-[85%] rounded-full piece-black highlight-last'; // 蛇头加红框高亮
+                            cell.appendChild(pDiv);
+                        } else if (isBody) {
+                            const pDiv = document.createElement('div');
+                            pDiv.className = 'w-[85%] h-[85%] rounded-full piece-black';
+                            cell.appendChild(pDiv);
+                        } else if (isFood) {
+                            const pDiv = document.createElement('div');
+                            pDiv.className = 'w-[85%] h-[85%] rounded-full piece-white shadow-[0_0_15px_rgba(255,255,255,0.8)]'; // 食物加白色发光
+                            cell.appendChild(pDiv);
+                        }
+                        grid.appendChild(cell);
+                    }
+                }
+            },
+
+            pause() { this.isPaused = true; clearInterval(this.timer); },
+            resume() { this.isPaused = false; this.timer = setInterval(() => this.update(), this.speedMs); },
+            stop() { this.pause(); this.isPlaying = false; document.removeEventListener('keydown', this.handleKey); },
+
+            async gameOver(reason) {
+                this.stop();
+                // 向后端记录分数
+                await fetch('/api/snake/record', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({speed: this.speedLevel, score: this.score})
+                });
+                alert(`贪吃蛇游戏结束！\n原因: ${reason}\n难度: ${this.speedLevel} 档\n最终得分: ${this.score} 分`);
+                showSnakeHistory(); // 游戏结束后自动弹出历史战绩供查阅
+            },
+
+            updateUI() {
+                document.getElementById('statusText').innerText = `得分: ${this.score} (速度 ${this.speedLevel} 档)`;
+                document.getElementById('statusText').className = "text-lg font-bold text-yellow-400";
+            }
+        };
+
+        function startSnakeGame() {
+            const speed = document.getElementById('speedSlider').value;
+            setupBaseUI();
+            document.getElementById('pauseBtn').classList.remove('hidden');
+            SnakeEngine.start(speed);
+        }
+
+        // ================= 其他五子棋逻辑 =================
         async function startGameAI(color) {
             myColor = color; currentTurn = 1; isGameOver = false;
             setupBaseUI();
@@ -232,11 +421,7 @@
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(`${protocol}//${window.location.host}/ws/pvp/${roomId}/${mode}`);
 
-            ws.onerror = function() {
-                alert("无法连接到游戏服务器！请确保 Python 后端正在运行。");
-                location.reload();
-            };
-
+            ws.onerror = function() { alert("无法连接到游戏服务器！请确保 Python 后端正在运行。"); location.reload(); };
             ws.onmessage = function(event) {
                 const data = JSON.parse(event.data);
                 if (data.type === "error") { alert(data.msg); location.reload(); }
@@ -261,9 +446,7 @@
                     } else updatePvPStatus();
                 }
                 else if (data.type === "opponent_left") {
-                    isGameOver = true;
-                    alert("对手已断开连接！游戏结束。");
-                    location.reload();
+                    isGameOver = true; alert("对手已断开连接！游戏结束。"); location.reload();
                 }
             };
         }
@@ -280,7 +463,7 @@
         }
 
         async function onPlayerClick(x, y) {
-            if (isGameOver || isPaused || currentTurn !== myColor) return;
+            if (mode === 'SNAKE' || isGameOver || isPaused || currentTurn !== myColor) return; // 贪吃蛇禁用点击
             if (gameType === 'PVP') ws.send(JSON.stringify({ action: "play", x: x, y: y, z: currentZ }));
             else {
                 const res = await API.play(x, y, currentZ, myColor);
@@ -304,12 +487,12 @@
         }
 
         function changeZ(val) {
-            currentZ = parseInt(val);
-            document.getElementById('zLabel').innerText = `当前深度 Z = ${currentZ}`;
+            currentZ = parseInt(val); document.getElementById('zLabel').innerText = `当前深度 Z = ${currentZ}`;
             render2DGrid(); if (mode !== '2D') Render3D.highlightLayer(currentZ);
         }
 
         function render2DGrid() {
+            if (mode === 'SNAKE') return; // 贪吃蛇有自己的专属渲染循环
             const grid = document.getElementById('grid2d');
             grid.innerHTML = ''; grid.style.gridTemplateColumns = `repeat(${size}, minmax(0, 1fr))`;
             let pxSize = mode === '2D' ? '600px' : '350px';
@@ -336,12 +519,25 @@
         function togglePause() {
             if (isGameOver || gameType === 'PVP') return;
             const btn = document.getElementById('pauseBtn'), overlay = document.getElementById('pauseOverlay');
+
+            // ★ 贪吃蛇独立暂停逻辑 ★
+            if (mode === 'SNAKE') {
+                if (SnakeEngine.isPaused) {
+                    SnakeEngine.resume(); overlay.classList.add('hidden');
+                    btn.innerText = '暂停'; btn.classList.replace('bg-emerald-600', 'bg-yellow-600'); btn.classList.replace('hover:bg-emerald-500', 'hover:bg-yellow-500');
+                } else {
+                    SnakeEngine.pause(); document.getElementById('pauseTip').innerText = '按键盘方向键准备好后点击继续'; overlay.classList.remove('hidden');
+                    btn.innerText = '▶ 继续'; btn.classList.replace('bg-yellow-600', 'bg-emerald-600'); btn.classList.replace('hover:bg-yellow-500', 'hover:bg-emerald-500');
+                }
+                return;
+            }
+
             if (isPaused) {
                 isPaused = false; overlay.classList.add('hidden');
                 btn.innerText = '暂停'; btn.classList.replace('bg-emerald-600', 'bg-yellow-600'); btn.classList.replace('hover:bg-emerald-500', 'hover:bg-yellow-500');
                 if (pausedTurn === 'HUMAN') startTimer(timeLeft); else if (pausedTurn === 'AI') startAIWait(aiWaitLeft);
             } else {
-                isPaused = true; overlay.classList.remove('hidden');
+                isPaused = true; document.getElementById('pauseTip').innerText = '您可以自由旋转右侧 3D 空间进行战局分析'; overlay.classList.remove('hidden');
                 btn.innerText = '▶ 继续'; btn.classList.replace('bg-yellow-600', 'bg-emerald-600'); btn.classList.replace('hover:bg-yellow-500', 'hover:bg-emerald-500');
                 clearInterval(timerObj); clearInterval(aiWaitObj); pausedTurn = currentTurn === myColor ? 'HUMAN' : 'AI';
             }
@@ -365,7 +561,7 @@
                 if(isPaused) return;
                 document.getElementById('statusText').innerText = `等待 AI 落子... (${--aiWaitLeft}s)`; document.getElementById('statusText').className = "text-sm font-bold text-orange-400 animate-pulse";
                 if (aiWaitLeft <= 0) {
-                    clearInterval(aiWaitObj); document.getElementById('statusText').innerText = "AI 云端矩阵算力全开中...";
+                    clearInterval(aiWaitObj); document.getElementById('statusText').innerText = "AI 云端计算中...";
                     API.aiPlay(-myColor).then(res => {
                         if (mode !== '2D' && res.move) { currentZ = res.move.z; document.getElementById('zSlider').value = currentZ; changeZ(currentZ); }
                         handleMoveResultAI(res, -myColor);
@@ -375,7 +571,7 @@
         }
 
         async function handleUndo() {
-            if (isGameOver || isPaused || gameType === 'PVP') return;
+            if (isGameOver || isPaused || gameType === 'PVP' || mode === 'SNAKE') return;
             if (currentTurn !== myColor) {
                 const res = await API.undo();
                 if (res.success) { localState = res.state; lastMove = res.lastMove; currentTurn = myColor; render2DGrid(); if (mode !== '2D') Render3D.sync(localState); startTimer(60); }
@@ -385,6 +581,7 @@
             }
         }
 
+        // ================= Three.js 渲染 =================
         const Render3D = {
             scene: null, camera: null, renderer: null, controls: null, pieceGroup: null, layerGroup: null, lastMoveRing: null, SPACING: 1.2,
             init() {
