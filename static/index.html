@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全维度五子棋 (前后端分离版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body { background-color: #0f172a; color: white; overflow: hidden; user-select: none; }
+        .glass { background: rgba(30, 41, 59, 0.75); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.1); }
+        .glass-btn { background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0)); border: 1px solid rgba(255,255,255,0.18); transition: all 0.3s; }
+        .glass-btn:hover { background: rgba(255,255,255,0.2); transform: translateY(-2px); }
+        input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 20px; width: 20px; border-radius: 50%; background: #3b82f6; cursor: pointer; margin-top: -8px; border: 2px solid white;}
+        input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 4px; background: rgba(255,255,255,0.2); }
+        .piece-black { background: radial-gradient(circle at 30% 30%, #4b5563, #000000); box-shadow: 2px 2px 5px rgba(0,0,0,0.5); }
+        .piece-white { background: radial-gradient(circle at 30% 30%, #ffffff, #9ca3af); box-shadow: 2px 2px 5px rgba(0,0,0,0.5); }
+        .piece-rock { background: linear-gradient(135deg, #6b7280, #374151); }
+        .highlight-last { border: 2px solid #ef4444; box-shadow: 0 0 12px #ef4444; }
+    </style>
+</head>
+<body class="h-screen w-screen relative">
+
+    <div id="mainMenu" class="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-900">
+        <h1 class="text-6xl font-black mb-12 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500">全维度五子棋 (C/S 架构)</h1>
+        <div class="flex flex-col space-y-6 w-80">
+            <button onclick="startGame('2D')" class="glass-btn py-4 rounded-xl text-xl font-bold text-emerald-400">▶ 经典 2D 模式</button>
+            <button onclick="startGame('3D_NORMAL')" class="glass-btn py-4 rounded-xl text-xl font-bold text-blue-400">▶ 标准 3D 模式</button>
+            <button onclick="startGame('3D_MELT')" class="glass-btn py-4 rounded-xl text-xl font-bold text-purple-400">▶ 融解 3D 模式</button>
+        </div>
+    </div>
+
+    <div id="gameUI" class="hidden h-full flex-col">
+        <header class="glass w-full p-4 flex justify-between items-center z-10 border-b border-slate-700">
+            <div class="flex items-center space-x-6">
+                <h1 id="modeTitle" class="text-2xl font-black text-blue-400">模式</h1>
+                <div id="scoreBoard" class="hidden px-4 py-1.5 bg-purple-900/40 border border-purple-500/30 rounded-lg">
+                    <span id="scoreText" class="font-bold text-white">融解得分 >> 黑: 0/5 | 白: 0/5</span>
+                </div>
+            </div>
+            <div class="flex items-center space-x-4">
+                <div class="flex flex-col items-end mr-4">
+                    <span id="timerText" class="text-xl font-mono font-bold text-red-400">60s</span>
+                    <span id="statusText" class="text-sm font-bold text-emerald-400">玩家回合</span>
+                </div>
+                <button id="pauseBtn" onclick="togglePause()" class="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg font-bold transition">暂停</button>
+                <button onclick="handleUndo()" class="px-5 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold">悔棋</button>
+                <button onclick="location.reload()" class="px-5 py-2 bg-red-600 hover:bg-red-500 rounded-lg font-bold">返回主菜单</button>
+            </div>
+        </header>
+
+        <main class="flex-1 flex relative">
+            <div id="pauseOverlay" class="hidden absolute inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center">
+                <div class="text-center">
+                    <h1 class="text-6xl font-black text-white tracking-widest mb-4">游戏已暂停</h1>
+                    <p class="text-xl text-slate-300">您可以自由旋转右侧 3D 空间进行战局分析</p>
+                </div>
+            </div>
+
+            <aside id="panel2D" class="w-[450px] h-full glass border-r border-slate-700 flex flex-col z-10">
+                <div class="p-6 flex flex-col h-full">
+                    <h2 class="text-lg font-bold text-blue-400 mb-2">2D 战术落子区</h2>
+
+                    <div id="zControl" class="mb-4">
+                        <div class="flex justify-between text-xs font-bold text-slate-400 mb-1">
+                            <span>◀ 0 (底层)</span>
+                            <span id="zLabel" class="text-blue-400 text-sm">当前深度 Z = 0</span>
+                            <span id="zMaxLabel">Max (顶层) ▶</span>
+                        </div>
+                        <input type="range" id="zSlider" min="0" value="0" oninput="changeZ(this.value)">
+                    </div>
+
+                    <div class="flex-1 flex items-center justify-center relative">
+                        <div class="relative pl-8 pt-8">
+                            <div class="absolute top-2 left-8 right-0 flex items-center text-red-400 font-bold text-sm">
+                                <span>0</span> <div class="flex-1 h-px bg-red-400/50 mx-2"></div> <span>X 轴</span> <span class="ml-1">▶</span>
+                            </div>
+                            <div class="absolute left-1 top-8 bottom-0 flex flex-col items-center justify-between text-blue-400 font-bold text-sm">
+                                <span>0</span> <div class="w-px flex-1 bg-blue-400/50 my-2"></div> <span style="writing-mode: vertical-rl;">Y 轴</span> <span class="mt-1">▼</span>
+                            </div>
+
+                            <div id="grid2d" class="relative z-10 grid gap-[1px] p-2 bg-[#d4a373] rounded-lg border-4 border-[#bc6c25]"></div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+            <div id="canvas3d" class="flex-1 relative cursor-move bg-[#0f172a]">
+                <div id="axesLegend" class="hidden absolute top-4 left-4 bg-slate-900/70 p-3 rounded-lg text-sm text-white border border-white/10 shadow-lg">
+                    <div class="font-bold mb-2 border-b border-white/20 pb-1">3D 坐标系说明</div>
+                    <div class="flex items-center"><div class="w-3 h-3 bg-red-500 rounded-full mr-2"></div> X 轴 (横向列)</div>
+                    <div class="flex items-center my-1"><div class="w-3 h-3 bg-blue-500 rounded-full mr-2"></div> Y 轴 (纵向行)</div>
+                    <div class="flex items-center"><div class="w-3 h-3 bg-green-500 rounded-full mr-2"></div> Z 轴 (空间层高)</div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const API = {
+            async init(mode) { await fetch('/api/init', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode}) }); },
+            async play(x, y, z, player) { let res = await fetch('/api/play', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({x, y, z, player}) }); return await res.json(); },
+            async aiPlay(player) { let res = await fetch('/api/ai_play', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({player}) }); return await res.json(); },
+            async undo() { let res = await fetch('/api/undo', { method: 'POST' }); return await res.json(); }
+        };
+
+        let mode = '2D', size = 15, currentZ = 0, humanColor = 1, currentPlayer = 1;
+        let isGameOver = false, timerObj, aiWaitObj, timeLeft = 60, aiWaitLeft = 5;
+        let localState = null, lastMove = null;
+
+        // 暂停状态变量
+        let isPaused = false;
+        let pausedTurn = null; // 'HUMAN' or 'AI'
+
+        async function startGame(selectedMode) {
+            mode = selectedMode;
+            size = mode === '3D_NORMAL' ? 10 : 15;
+            currentZ = mode === '2D' ? 0 : Math.floor(size/2);
+
+            document.getElementById('mainMenu').classList.add('hidden');
+            document.getElementById('gameUI').classList.replace('hidden', 'flex');
+            document.getElementById('modeTitle').innerText = mode;
+
+            document.getElementById('zSlider').max = size - 1;
+            document.getElementById('zMaxLabel').innerText = `${size - 1} (顶层) ▶`;
+            document.getElementById('zSlider').value = currentZ;
+            document.getElementById('zLabel').innerText = `当前深度 Z = ${currentZ}`;
+
+            if (mode === '2D') {
+                document.getElementById('zControl').classList.add('hidden');
+                document.getElementById('canvas3d').classList.add('hidden');
+                document.getElementById('panel2D').classList.replace('w-[450px]', 'w-full');
+            } else {
+                document.getElementById('scoreBoard').classList.toggle('hidden', mode !== '3D_MELT');
+                document.getElementById('axesLegend').classList.remove('hidden');
+                Render3D.init();
+            }
+
+            await API.init(mode);
+            localState = Array(size).fill().map(()=>Array(size).fill().map(()=>Array(size).fill(0)));
+            render2DGrid();
+            if (mode !== '2D') Render3D.sync(localState);
+            startTimer(60);
+        }
+
+        // ================= 暂停逻辑 =================
+        function togglePause() {
+            if (isGameOver) return;
+            const btn = document.getElementById('pauseBtn');
+            const overlay = document.getElementById('pauseOverlay');
+
+            if (isPaused) {
+                // 恢复游戏
+                isPaused = false;
+                overlay.classList.add('hidden');
+                btn.innerText = '暂停';
+                btn.classList.replace('bg-emerald-600', 'bg-yellow-600');
+                btn.classList.replace('hover:bg-emerald-500', 'hover:bg-yellow-500');
+
+                if (pausedTurn === 'HUMAN') startTimer(timeLeft);
+                else if (pausedTurn === 'AI') startAIWait(aiWaitLeft);
+            } else {
+                // 暂停游戏
+                isPaused = true;
+                overlay.classList.remove('hidden');
+                btn.innerText = '▶ 继续';
+                btn.classList.replace('bg-yellow-600', 'bg-emerald-600');
+                btn.classList.replace('hover:bg-yellow-500', 'hover:bg-emerald-500');
+
+                clearInterval(timerObj);
+                clearInterval(aiWaitObj);
+                pausedTurn = currentPlayer === humanColor ? 'HUMAN' : 'AI';
+            }
+        }
+
+        function changeZ(val) {
+            currentZ = parseInt(val);
+            document.getElementById('zLabel').innerText = `当前深度 Z = ${currentZ}`;
+            render2DGrid();
+            if (mode !== '2D') Render3D.highlightLayer(currentZ);
+        }
+
+        function render2DGrid() {
+            const grid = document.getElementById('grid2d');
+            grid.innerHTML = '';
+            grid.style.gridTemplateColumns = `repeat(${size}, minmax(0, 1fr))`;
+            let pxSize = mode === '2D' ? '600px' : '350px';
+            grid.style.width = pxSize; grid.style.height = pxSize;
+
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'grid-cell w-full aspect-square border border-white/10 flex items-center justify-center cursor-pointer';
+                    cell.onclick = () => onPlayerClick(x, y);
+
+                    const p = mode === '2D' ? localState[0][y][x] : localState[currentZ][y][x];
+                    if (p !== 0) {
+                        const pDiv = document.createElement('div');
+                        pDiv.className = `w-[85%] h-[85%] rounded-full ${p===1?'piece-black':(p===-1?'piece-white':'piece-rock')}`;
+                        if (lastMove && lastMove.x === x && lastMove.y === y && lastMove.z === (mode==='2D'?0:currentZ) && p !== 2) {
+                            pDiv.classList.add('highlight-last');
+                        }
+                        cell.appendChild(pDiv);
+                    }
+                    grid.appendChild(cell);
+                }
+            }
+        }
+
+        async function onPlayerClick(x, y) {
+            if (isGameOver || isPaused || currentPlayer !== humanColor) return;
+            const res = await API.play(x, y, currentZ, humanColor);
+            if (res.success) handleMoveResult(res, humanColor);
+        }
+
+        function handleMoveResult(res, player) {
+            localState = res.state;
+            lastMove = res.lastMove;
+            render2DGrid();
+            if (mode !== '2D') Render3D.sync(localState);
+
+            if (mode === '3D_MELT') {
+                document.getElementById('scoreText').innerText = `融解得分 >> 黑: ${res.scores['1']}/5 | 白: ${res.scores['-1']}/5`;
+            }
+
+            if (res.isWin) {
+                isGameOver = true;
+                clearInterval(timerObj); clearInterval(aiWaitObj);
+                document.getElementById('statusText').innerText = `${player === humanColor ? '玩家' : 'AI'} 获胜！`;
+                setTimeout(() => alert("游戏结束！"), 100);
+            } else {
+                currentPlayer = -player;
+                if (currentPlayer === humanColor) startTimer(60);
+                else startAIWait(5);
+            }
+        }
+
+        function startTimer(initialTime) {
+            clearInterval(timerObj); clearInterval(aiWaitObj);
+            timeLeft = initialTime;
+            document.getElementById('statusText').innerText = "玩家回合";
+
+            timerObj = setInterval(() => {
+                if(isPaused) return;
+                document.getElementById('timerText').innerText = `${--timeLeft}s`;
+                if (timeLeft <= 0) {
+                    clearInterval(timerObj);
+                    document.getElementById('statusText').innerText = "超时代下...";
+                    API.aiPlay(humanColor).then(res => handleMoveResult(res, humanColor));
+                }
+            }, 1000);
+        }
+
+        function startAIWait(initialTime) {
+            clearInterval(timerObj); clearInterval(aiWaitObj);
+            aiWaitLeft = initialTime;
+            document.getElementById('timerText').innerText = "--";
+
+            aiWaitObj = setInterval(() => {
+                if(isPaused) return;
+                document.getElementById('statusText').innerText = `等待 AI 落子... (${--aiWaitLeft}s)`;
+                if (aiWaitLeft <= 0) {
+                    clearInterval(aiWaitObj);
+                    document.getElementById('statusText').innerText = "AI 运算中...";
+                    API.aiPlay(-humanColor).then(res => {
+                        if (mode !== '2D' && res.move) {
+                            currentZ = res.move.z;
+                            document.getElementById('zSlider').value = currentZ;
+                            changeZ(currentZ);
+                        }
+                        handleMoveResult(res, -humanColor);
+                    });
+                }
+            }, 1000);
+        }
+
+        async function handleUndo() {
+            if (isGameOver || isPaused) return;
+            if (currentPlayer !== humanColor) {
+                const res = await API.undo();
+                if (res.success) {
+                    localState = res.state; lastMove = res.lastMove;
+                    currentPlayer = humanColor;
+                    render2DGrid();
+                    if (mode !== '2D') Render3D.sync(localState);
+                    startTimer(60);
+                }
+            } else {
+                await API.undo();
+                const res = await API.undo();
+                if (res.success) {
+                    localState = res.state; lastMove = res.lastMove;
+                    render2DGrid();
+                    if (mode !== '2D') Render3D.sync(localState);
+                    startTimer(60);
+                }
+            }
+        }
+
+        // ================= Three.js 渲染 =================
+        const Render3D = {
+            scene: null, camera: null, renderer: null, controls: null,
+            pieceGroup: null, layerGroup: null, lastMoveRing: null, SPACING: 1.2,
+
+            init() {
+                if (this.scene) return;
+                const container = document.getElementById('canvas3d');
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+                this.camera.position.set(18, 18, 22);
+
+                this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+                this.renderer.setSize(container.clientWidth, container.clientHeight);
+                container.appendChild(this.renderer.domElement);
+
+                this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+                this.controls.enableDamping = true;
+
+                this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+                const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                dirLight.position.set(10, 20, 10);
+                this.scene.add(dirLight);
+
+                this.pieceGroup = new THREE.Group();
+                this.layerGroup = new THREE.Group();
+                this.scene.add(this.pieceGroup);
+                this.scene.add(this.layerGroup);
+
+                // ★ 新增：3D 坐标指示器 (AxesHelper) ★
+                const offset = (size - 1) * this.SPACING / 2;
+                const axesLength = size * this.SPACING + 2;
+                const axesHelper = new THREE.AxesHelper(axesLength);
+                // 将原点移动到我们逻辑上的 (0,0,0) 位置，即左下后方
+                axesHelper.position.set(-offset, -offset, -offset);
+                this.scene.add(axesHelper);
+
+                this.drawGrid();
+                this.highlightLayer(currentZ);
+
+                const animate = () => {
+                    requestAnimationFrame(animate);
+                    this.controls.update();
+                    if (this.lastMoveRing && !isPaused) {
+                        this.lastMoveRing.rotation.z += 0.03;
+                        this.lastMoveRing.scale.setScalar(1 + Math.sin(Date.now()*0.005)*0.1);
+                    }
+                    this.renderer.render(this.scene, this.camera);
+                };
+                animate();
+            },
+
+            drawGrid() {
+                const mat = new THREE.LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.3 });
+                const offset = (size - 1) * this.SPACING / 2;
+                for (let i = 0; i < size; i++) {
+                    for (let j = 0; j < size; j++) {
+                        const pi = i * this.SPACING - offset, pj = j * this.SPACING - offset;
+                        this.scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-offset, pi, pj), new THREE.Vector3(offset, pi, pj)]), mat));
+                        this.scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(pi, -offset, pj), new THREE.Vector3(pi, offset, pj)]), mat));
+                        this.scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(pi, pj, -offset), new THREE.Vector3(pi, pj, offset)]), mat));
+                    }
+                }
+            },
+
+            sync(state) {
+                while(this.pieceGroup.children.length > 0) this.pieceGroup.remove(this.pieceGroup.children[0]);
+                const offset = (size - 1) * this.SPACING / 2;
+
+                for (let z=0; z<size; z++) {
+                    for (let y=0; y<size; y++) {
+                        for (let x=0; x<size; x++) {
+                            const p = state[z][y][x];
+                            if (p !== 0) {
+                                let geo, mat;
+                                if (p === 2) {
+                                    geo = new THREE.BoxGeometry(this.SPACING*0.6, this.SPACING*0.6, this.SPACING*0.6);
+                                    mat = new THREE.MeshStandardMaterial({ color: 0x6b7280 });
+                                } else {
+                                    geo = new THREE.SphereGeometry(this.SPACING*0.4, 32, 32);
+                                    mat = new THREE.MeshStandardMaterial({ color: p===1?0x111111:0xffffff, roughness: 0.2, metalness: p===1?0.8:0.1 });
+                                }
+                                const mesh = new THREE.Mesh(geo, mat);
+                                // ★ 修改：Z轴映射纠正，z=0 在最底端 (-offset) ★
+                                mesh.position.set(x*this.SPACING - offset, (z*this.SPACING - offset), y*this.SPACING - offset);
+                                this.pieceGroup.add(mesh);
+                            }
+                        }
+                    }
+                }
+
+                if (this.lastMoveRing) this.scene.remove(this.lastMoveRing);
+                if (lastMove && state[lastMove.z][lastMove.y][lastMove.x] !== 2) {
+                    const geo = new THREE.RingGeometry(this.SPACING*0.5, this.SPACING*0.6, 32);
+                    const mat = new THREE.MeshBasicMaterial({ color: 0xef4444, side: THREE.DoubleSide });
+                    this.lastMoveRing = new THREE.Mesh(geo, mat);
+                    // ★ 同样修正高亮环的高度 ★
+                    this.lastMoveRing.position.set(lastMove.x*this.SPACING - offset, (lastMove.z*this.SPACING - offset) + 0.05, lastMove.y*this.SPACING - offset);
+                    this.lastMoveRing.rotation.x = Math.PI / 2;
+                    this.scene.add(this.lastMoveRing);
+                }
+            },
+
+            highlightLayer(z) {
+                while(this.layerGroup.children.length > 0) this.layerGroup.remove(this.layerGroup.children[0]);
+                const plane = new THREE.Mesh(
+                    new THREE.PlaneGeometry(size * this.SPACING, size * this.SPACING),
+                    new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.15, side: THREE.DoubleSide })
+                );
+                plane.rotation.x = Math.PI / 2;
+                // ★ 修改：Z轴平面位置反转修正 ★
+                plane.position.y = (z * this.SPACING - (size - 1) * this.SPACING / 2);
+                this.layerGroup.add(plane);
+            }
+        };
+    </script>
+</body>
+</html>
