@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>全维度五子棋 (前后端分离版)</title>
+    <title>全维度五子棋 (单机 AI / 联机 PvP)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
@@ -23,15 +23,59 @@
 </head>
 <body class="h-screen w-screen relative">
 
+    <!-- 主菜单 -->
     <div id="mainMenu" class="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-900">
-        <h1 class="text-6xl font-black mb-12 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500">全维度五子棋 (C/S 架构)</h1>
+        <h1 class="text-6xl font-black mb-12 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500">全维度五子棋合集</h1>
         <div class="flex flex-col space-y-6 w-80">
-            <button onclick="startGame('2D')" class="glass-btn py-4 rounded-xl text-xl font-bold text-emerald-400">▶ 经典 2D 模式</button>
-            <button onclick="startGame('3D_NORMAL')" class="glass-btn py-4 rounded-xl text-xl font-bold text-blue-400">▶ 标准 3D 模式</button>
-            <button onclick="startGame('3D_MELT')" class="glass-btn py-4 rounded-xl text-xl font-bold text-purple-400">▶ 融解 3D 模式</button>
+            <button onclick="openOpponentModal('2D')" class="glass-btn py-4 rounded-xl text-xl font-bold text-emerald-400">▶ 经典 2D 模式</button>
+            <button onclick="openOpponentModal('3D_NORMAL')" class="glass-btn py-4 rounded-xl text-xl font-bold text-blue-400">▶ 标准 3D 模式</button>
+            <button onclick="openOpponentModal('3D_MELT')" class="glass-btn py-4 rounded-xl text-xl font-bold text-purple-400">▶ 融解 3D 模式</button>
         </div>
     </div>
 
+    <!-- 弹窗 1：选择对战类型 -->
+    <div id="opponentModal" class="hidden absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur">
+        <div class="glass p-8 rounded-2xl w-96 border border-white/20 shadow-2xl">
+            <h2 class="text-2xl font-bold text-center mb-8">选择对战类型</h2>
+            <div class="flex justify-between space-x-4">
+                <button onclick="openColorModal()" class="flex-1 bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold transition">单机大战 AI</button>
+                <button onclick="openRoomModal()" class="flex-1 bg-purple-600 hover:bg-purple-500 py-4 rounded-xl font-bold transition">联机真人 PvP</button>
+            </div>
+            <button onclick="document.getElementById('opponentModal').classList.add('hidden')" class="mt-6 w-full py-2 text-slate-400 hover:text-white transition">返回主菜单</button>
+        </div>
+    </div>
+
+    <!-- 弹窗 2：单机选色 -->
+    <div id="colorModal" class="hidden absolute inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur">
+        <div class="glass p-8 rounded-2xl w-96 border border-white/20 shadow-2xl">
+            <h2 class="text-2xl font-bold text-center mb-8">选择您的阵营</h2>
+            <div class="flex justify-between space-x-4">
+                <button onclick="startGameAI(1)" class="flex-1 bg-slate-800 hover:bg-slate-700 py-4 rounded-xl font-bold transition">执黑 (玩家先)</button>
+                <button onclick="startGameAI(-1)" class="flex-1 bg-slate-100 hover:bg-white text-black py-4 rounded-xl font-bold transition">执白 (AI 先)</button>
+            </div>
+            <button onclick="document.getElementById('colorModal').classList.add('hidden')" class="mt-6 w-full py-2 text-slate-400 hover:text-white transition">返回</button>
+        </div>
+    </div>
+
+    <!-- 弹窗 3：联机开房 -->
+    <div id="roomModal" class="hidden absolute inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur">
+        <div class="glass p-8 rounded-2xl w-96 border border-white/20 shadow-2xl">
+            <h2 class="text-2xl font-bold text-center mb-4 text-purple-400">创建或加入房间</h2>
+            <p class="text-sm text-slate-400 mb-6 text-center">输入房间号加入，留空则自动创建新房间。</p>
+            <input type="text" id="roomInput" placeholder="例如: 1234" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 mb-6 text-center text-xl text-white outline-none focus:border-purple-500 transition">
+            <button onclick="startGamePvP()" class="w-full bg-purple-600 hover:bg-purple-500 py-4 rounded-xl font-bold transition text-lg shadow-[0_0_15px_rgba(147,51,234,0.5)]">进入联机大厅</button>
+            <button onclick="document.getElementById('roomModal').classList.add('hidden')" class="mt-6 w-full py-2 text-slate-400 hover:text-white transition">返回</button>
+        </div>
+    </div>
+
+    <!-- 联机等待遮罩 -->
+    <div id="waitingOverlay" class="hidden absolute inset-0 z-40 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center">
+        <div class="w-16 h-16 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mb-6"></div>
+        <h1 class="text-4xl font-black text-white tracking-widest mb-4">等待对手加入...</h1>
+        <p id="roomDisplayCode" class="text-2xl font-mono text-purple-400 bg-purple-900/50 px-6 py-2 rounded-lg border border-purple-500/30">房间号: ---</p>
+    </div>
+
+    <!-- 游戏主界面 -->
     <div id="gameUI" class="hidden h-full flex-col">
         <header class="glass w-full p-4 flex justify-between items-center z-10 border-b border-slate-700">
             <div class="flex items-center space-x-6">
@@ -42,12 +86,13 @@
             </div>
             <div class="flex items-center space-x-4">
                 <div class="flex flex-col items-end mr-4">
-                    <span id="timerText" class="text-xl font-mono font-bold text-red-400">60s</span>
-                    <span id="statusText" class="text-sm font-bold text-emerald-400">玩家回合</span>
+                    <span id="roomInfoTop" class="text-xs font-mono text-slate-400 hidden mb-1">Room: 1234</span>
+                    <span id="timerText" class="text-xl font-mono font-bold text-red-400">--</span>
+                    <span id="statusText" class="text-sm font-bold text-emerald-400">就绪</span>
                 </div>
                 <button id="pauseBtn" onclick="togglePause()" class="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg font-bold transition">暂停</button>
-                <button onclick="handleUndo()" class="px-5 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold">悔棋</button>
-                <button onclick="location.reload()" class="px-5 py-2 bg-red-600 hover:bg-red-500 rounded-lg font-bold">返回主菜单</button>
+                <button id="undoBtn" onclick="handleUndo()" class="px-5 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold">悔棋</button>
+                <button onclick="location.reload()" class="px-5 py-2 bg-red-600 hover:bg-red-500 rounded-lg font-bold">退出房间</button>
             </div>
         </header>
 
@@ -62,7 +107,6 @@
             <aside id="panel2D" class="w-[450px] h-full glass border-r border-slate-700 flex flex-col z-10">
                 <div class="p-6 flex flex-col h-full">
                     <h2 class="text-lg font-bold text-blue-400 mb-2">2D 战术落子区</h2>
-
                     <div id="zControl" class="mb-4">
                         <div class="flex justify-between text-xs font-bold text-slate-400 mb-1">
                             <span>◀ 0 (底层)</span>
@@ -72,15 +116,11 @@
                         <input type="range" id="zSlider" min="0" value="0" oninput="changeZ(this.value)">
                     </div>
 
-                    <div class="flex-1 flex items-center justify-center relative">
+                    <!-- ★ 赋予 ID 以便 JS 动态修改居中或上移对齐 ★ -->
+                    <div id="gridContainer" class="flex-1 flex items-center justify-center relative">
                         <div class="relative pl-8 pt-8">
-                            <div class="absolute top-2 left-8 right-0 flex items-center text-red-400 font-bold text-sm">
-                                <span>0</span> <div class="flex-1 h-px bg-red-400/50 mx-2"></div> <span>X 轴</span> <span class="ml-1">▶</span>
-                            </div>
-                            <div class="absolute left-1 top-8 bottom-0 flex flex-col items-center justify-between text-blue-400 font-bold text-sm">
-                                <span>0</span> <div class="w-px flex-1 bg-blue-400/50 my-2"></div> <span style="writing-mode: vertical-rl;">Y 轴</span> <span class="mt-1">▼</span>
-                            </div>
-
+                            <div class="absolute top-2 left-8 right-0 flex items-center text-red-400 font-bold text-sm"><span>0</span> <div class="flex-1 h-px bg-red-400/50 mx-2"></div> <span>X 轴</span> <span class="ml-1">▶</span></div>
+                            <div class="absolute left-1 top-8 bottom-0 flex flex-col items-center justify-between text-blue-400 font-bold text-sm"><span>0</span> <div class="w-px flex-1 bg-blue-400/50 my-2"></div> <span style="writing-mode: vertical-rl;">Y 轴</span> <span class="mt-1">▼</span></div>
                             <div id="grid2d" class="relative z-10 grid gap-[1px] p-2 bg-[#d4a373] rounded-lg border-4 border-[#bc6c25]"></div>
                         </div>
                     </div>
@@ -98,79 +138,194 @@
     </div>
 
     <script>
+        // ================= 全局状态与网络管理 =================
+        let gameType = 'AI'; // 'AI' or 'PVP'
+        let mode = '2D', size = 15, currentZ = 0, myColor = 1, currentTurn = 1;
+        let isGameOver = false, timerObj, aiWaitObj, timeLeft = 60;
+        let localState = null, lastMove = null;
+        let isPaused = false, pausedTurn = null;
+        let ws = null; // WebSocket 实例
+
         const API = {
-            async init(mode) { await fetch('/api/init', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode}) }); },
-            async play(x, y, z, player) { let res = await fetch('/api/play', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({x, y, z, player}) }); return await res.json(); },
-            async aiPlay(player) { let res = await fetch('/api/ai_play', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({player}) }); return await res.json(); },
+            async init(m) { await fetch('/api/init', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode:m}) }); },
+            async play(x, y, z, p) { let res = await fetch('/api/play', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({x,y,z,player:p}) }); return await res.json(); },
+            async aiPlay(p) { let res = await fetch('/api/ai_play', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({player:p}) }); return await res.json(); },
             async undo() { let res = await fetch('/api/undo', { method: 'POST' }); return await res.json(); }
         };
 
-        let mode = '2D', size = 15, currentZ = 0, humanColor = 1, currentPlayer = 1;
-        let isGameOver = false, timerObj, aiWaitObj, timeLeft = 60, aiWaitLeft = 5;
-        let localState = null, lastMove = null;
+        // ================= 菜单导航流 =================
+        function openOpponentModal(m) { mode = m; document.getElementById('opponentModal').classList.remove('hidden'); }
+        function openColorModal() { gameType = 'AI'; document.getElementById('opponentModal').classList.add('hidden'); document.getElementById('colorModal').classList.remove('hidden'); }
+        function openRoomModal() { gameType = 'PVP'; document.getElementById('opponentModal').classList.add('hidden'); document.getElementById('roomModal').classList.remove('hidden'); }
 
-        // 暂停状态变量
-        let isPaused = false;
-        let pausedTurn = null; // 'HUMAN' or 'AI'
-
-        async function startGame(selectedMode) {
-            mode = selectedMode;
+        function setupBaseUI() {
             size = mode === '3D_NORMAL' ? 10 : 15;
             currentZ = mode === '2D' ? 0 : Math.floor(size/2);
-
             document.getElementById('mainMenu').classList.add('hidden');
+            document.getElementById('colorModal').classList.add('hidden');
+            document.getElementById('roomModal').classList.add('hidden');
             document.getElementById('gameUI').classList.replace('hidden', 'flex');
-            document.getElementById('modeTitle').innerText = mode;
 
+            let prefix = gameType === 'PVP' ? '[联机PvP] ' : '[单机AI] ';
+            document.getElementById('modeTitle').innerText = prefix + mode;
             document.getElementById('zSlider').max = size - 1;
             document.getElementById('zMaxLabel').innerText = `${size - 1} (顶层) ▶`;
             document.getElementById('zSlider').value = currentZ;
             document.getElementById('zLabel').innerText = `当前深度 Z = ${currentZ}`;
 
+            // ★ 优化：动态控制 2D 和 3D 模式下的布局对齐方式 ★
+            const gridContainer = document.getElementById('gridContainer');
+
             if (mode === '2D') {
                 document.getElementById('zControl').classList.add('hidden');
                 document.getElementById('canvas3d').classList.add('hidden');
                 document.getElementById('panel2D').classList.replace('w-[450px]', 'w-full');
+
+                // 2D 模式下：取消垂直居中，改为顶部对齐并增加 pt-16
+                gridContainer.classList.remove('items-center');
+                gridContainer.classList.add('pt-16');
             } else {
                 document.getElementById('scoreBoard').classList.toggle('hidden', mode !== '3D_MELT');
                 document.getElementById('axesLegend').classList.remove('hidden');
+
+                // 3D 模式下：恢复垂直居中，移除 pt-16
+                gridContainer.classList.remove('pt-16');
+                gridContainer.classList.add('items-center');
+
                 Render3D.init();
             }
-
-            await API.init(mode);
             localState = Array(size).fill().map(()=>Array(size).fill().map(()=>Array(size).fill(0)));
             render2DGrid();
             if (mode !== '2D') Render3D.sync(localState);
-            startTimer(60);
         }
 
-        // ================= 暂停逻辑 =================
-        function togglePause() {
+        // ================= 单机 AI 模式启动 =================
+        async function startGameAI(color) {
+            myColor = color;
+            currentTurn = 1;
+            isGameOver = false;
+            setupBaseUI();
+
+            document.getElementById('pauseBtn').classList.remove('hidden');
+            document.getElementById('undoBtn').classList.remove('hidden');
+            document.getElementById('roomInfoTop').classList.add('hidden');
+
+            await API.init(mode);
+            if (myColor === 1) startTimer(60); else startAIWait(1);
+        }
+
+        // ================= 联机 PvP 模式启动与 WebSocket =================
+        function startGamePvP() {
+            let roomId = document.getElementById('roomInput').value.trim();
+            if (!roomId) roomId = Math.floor(1000 + Math.random() * 9000).toString();
+
+            setupBaseUI();
+
+            document.getElementById('pauseBtn').classList.add('hidden');
+            document.getElementById('undoBtn').classList.add('hidden');
+            document.getElementById('roomInfoTop').classList.remove('hidden');
+            document.getElementById('roomInfoTop').innerText = `网络房间: ${roomId}`;
+            document.getElementById('statusText').innerText = "连接服务器...";
+
+            document.getElementById('waitingOverlay').classList.remove('hidden');
+            document.getElementById('roomDisplayCode').innerText = `房间号: ${roomId} (请发给对手)`;
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws/pvp/${roomId}/${mode}`);
+
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+
+                if (data.type === "error") {
+                    alert(data.msg);
+                    location.reload();
+                }
+                else if (data.type === "connected") {
+                    myColor = data.color;
+                    console.log(data.msg);
+                }
+                else if (data.type === "start") {
+                    document.getElementById('waitingOverlay').classList.add('hidden');
+                    isGameOver = false;
+                    currentTurn = data.turn;
+                    updatePvPStatus();
+                }
+                else if (data.type === "update") {
+                    localState = data.state;
+                    lastMove = data.lastMove;
+                    currentTurn = data.turn;
+
+                    if (mode !== '2D') {
+                        currentZ = lastMove.z;
+                        document.getElementById('zSlider').value = currentZ;
+                        document.getElementById('zLabel').innerText = `当前深度 Z = ${currentZ}`;
+                    }
+
+                    render2DGrid();
+                    if (mode !== '2D') Render3D.sync(localState);
+
+                    if (mode === '3D_MELT') {
+                        document.getElementById('scoreText').innerText = `融解得分 >> 黑: ${data.scores['1']}/5 | 白: ${data.scores['-1']}/5`;
+                    }
+
+                    if (data.isWin) {
+                        isGameOver = true;
+                        let winnerStr = data.winner === myColor ? "胜利！" : "失败...";
+                        document.getElementById('statusText').innerText = `游戏结束！您${winnerStr}`;
+                        setTimeout(() => alert(data.winner === myColor ? "恭喜，您在联机对战中获胜！" : "很遗憾，您输给了对手。"), 200);
+                    } else {
+                        updatePvPStatus();
+                    }
+                }
+                else if (data.type === "opponent_left") {
+                    isGameOver = true;
+                    alert("对手已掉线或离开房间！");
+                    location.reload();
+                }
+            };
+        }
+
+        function updatePvPStatus() {
             if (isGameOver) return;
-            const btn = document.getElementById('pauseBtn');
-            const overlay = document.getElementById('pauseOverlay');
-
-            if (isPaused) {
-                // 恢复游戏
-                isPaused = false;
-                overlay.classList.add('hidden');
-                btn.innerText = '暂停';
-                btn.classList.replace('bg-emerald-600', 'bg-yellow-600');
-                btn.classList.replace('hover:bg-emerald-500', 'hover:bg-yellow-500');
-
-                if (pausedTurn === 'HUMAN') startTimer(timeLeft);
-                else if (pausedTurn === 'AI') startAIWait(aiWaitLeft);
+            if (currentTurn === myColor) {
+                document.getElementById('statusText').innerText = "您的回合 (请落子)";
+                document.getElementById('statusText').className = "text-sm font-bold text-emerald-400";
             } else {
-                // 暂停游戏
-                isPaused = true;
-                overlay.classList.remove('hidden');
-                btn.innerText = '▶ 继续';
-                btn.classList.replace('bg-yellow-600', 'bg-emerald-600');
-                btn.classList.replace('hover:bg-yellow-500', 'hover:bg-emerald-500');
+                document.getElementById('statusText').innerText = "等待对手落子...";
+                document.getElementById('statusText').className = "text-sm font-bold text-orange-400 animate-pulse";
+            }
+        }
 
-                clearInterval(timerObj);
-                clearInterval(aiWaitObj);
-                pausedTurn = currentPlayer === humanColor ? 'HUMAN' : 'AI';
+        // ================= 核心操作逻辑 =================
+        async function onPlayerClick(x, y) {
+            if (isGameOver || isPaused || currentTurn !== myColor) return;
+
+            if (gameType === 'PVP') {
+                ws.send(JSON.stringify({ action: "play", x: x, y: y, z: currentZ }));
+            } else {
+                const res = await API.play(x, y, currentZ, myColor);
+                if (res.success) handleMoveResultAI(res, myColor);
+            }
+        }
+
+        function handleMoveResultAI(res, player) {
+            localState = res.state;
+            lastMove = res.lastMove;
+            render2DGrid();
+            if (mode !== '2D') Render3D.sync(localState);
+
+            if (mode === '3D_MELT') {
+                document.getElementById('scoreText').innerText = `融解得分 >> 黑: ${res.scores['1']}/5 | 白: ${res.scores['-1']}/5`;
+            }
+
+            if (res.isWin) {
+                isGameOver = true;
+                clearInterval(timerObj); clearInterval(aiWaitObj);
+                document.getElementById('statusText').innerText = `${player === myColor ? '玩家' : 'AI'} 获胜！`;
+                setTimeout(() => alert("游戏结束！"), 100);
+            } else {
+                currentTurn = -player;
+                if (currentTurn === myColor) startTimer(60); else startAIWait(5);
             }
         }
 
@@ -208,38 +363,36 @@
             }
         }
 
-        async function onPlayerClick(x, y) {
-            if (isGameOver || isPaused || currentPlayer !== humanColor) return;
-            const res = await API.play(x, y, currentZ, humanColor);
-            if (res.success) handleMoveResult(res, humanColor);
-        }
+        // ================= 定时器与控制 =================
+        function togglePause() {
+            if (isGameOver || gameType === 'PVP') return;
+            const btn = document.getElementById('pauseBtn');
+            const overlay = document.getElementById('pauseOverlay');
 
-        function handleMoveResult(res, player) {
-            localState = res.state;
-            lastMove = res.lastMove;
-            render2DGrid();
-            if (mode !== '2D') Render3D.sync(localState);
-
-            if (mode === '3D_MELT') {
-                document.getElementById('scoreText').innerText = `融解得分 >> 黑: ${res.scores['1']}/5 | 白: ${res.scores['-1']}/5`;
-            }
-
-            if (res.isWin) {
-                isGameOver = true;
-                clearInterval(timerObj); clearInterval(aiWaitObj);
-                document.getElementById('statusText').innerText = `${player === humanColor ? '玩家' : 'AI'} 获胜！`;
-                setTimeout(() => alert("游戏结束！"), 100);
+            if (isPaused) {
+                isPaused = false;
+                overlay.classList.add('hidden');
+                btn.innerText = '暂停';
+                btn.classList.replace('bg-emerald-600', 'bg-yellow-600');
+                btn.classList.replace('hover:bg-emerald-500', 'hover:bg-yellow-500');
+                if (pausedTurn === 'HUMAN') startTimer(timeLeft);
+                else if (pausedTurn === 'AI') startAIWait(aiWaitLeft);
             } else {
-                currentPlayer = -player;
-                if (currentPlayer === humanColor) startTimer(60);
-                else startAIWait(5);
+                isPaused = true;
+                overlay.classList.remove('hidden');
+                btn.innerText = '▶ 继续';
+                btn.classList.replace('bg-yellow-600', 'bg-emerald-600');
+                btn.classList.replace('hover:bg-yellow-500', 'hover:bg-emerald-500');
+                clearInterval(timerObj); clearInterval(aiWaitObj);
+                pausedTurn = currentTurn === myColor ? 'HUMAN' : 'AI';
             }
         }
 
         function startTimer(initialTime) {
             clearInterval(timerObj); clearInterval(aiWaitObj);
             timeLeft = initialTime;
-            document.getElementById('statusText').innerText = "玩家回合";
+            document.getElementById('statusText').innerText = "您的回合 (请落子)";
+            document.getElementById('statusText').className = "text-sm font-bold text-emerald-400";
 
             timerObj = setInterval(() => {
                 if(isPaused) return;
@@ -247,11 +400,12 @@
                 if (timeLeft <= 0) {
                     clearInterval(timerObj);
                     document.getElementById('statusText').innerText = "超时代下...";
-                    API.aiPlay(humanColor).then(res => handleMoveResult(res, humanColor));
+                    API.aiPlay(myColor).then(res => handleMoveResultAI(res, myColor));
                 }
             }, 1000);
         }
 
+        let aiWaitLeft = 5;
         function startAIWait(initialTime) {
             clearInterval(timerObj); clearInterval(aiWaitObj);
             aiWaitLeft = initialTime;
@@ -260,28 +414,29 @@
             aiWaitObj = setInterval(() => {
                 if(isPaused) return;
                 document.getElementById('statusText').innerText = `等待 AI 落子... (${--aiWaitLeft}s)`;
+                document.getElementById('statusText').className = "text-sm font-bold text-orange-400 animate-pulse";
                 if (aiWaitLeft <= 0) {
                     clearInterval(aiWaitObj);
-                    document.getElementById('statusText').innerText = "AI 运算中...";
-                    API.aiPlay(-humanColor).then(res => {
+                    document.getElementById('statusText').innerText = "AI 云端矩阵算力全开中...";
+                    API.aiPlay(-myColor).then(res => {
                         if (mode !== '2D' && res.move) {
                             currentZ = res.move.z;
                             document.getElementById('zSlider').value = currentZ;
                             changeZ(currentZ);
                         }
-                        handleMoveResult(res, -humanColor);
+                        handleMoveResultAI(res, -myColor);
                     });
                 }
             }, 1000);
         }
 
         async function handleUndo() {
-            if (isGameOver || isPaused) return;
-            if (currentPlayer !== humanColor) {
+            if (isGameOver || isPaused || gameType === 'PVP') return;
+            if (currentTurn !== myColor) {
                 const res = await API.undo();
                 if (res.success) {
                     localState = res.state; lastMove = res.lastMove;
-                    currentPlayer = humanColor;
+                    currentTurn = myColor;
                     render2DGrid();
                     if (mode !== '2D') Render3D.sync(localState);
                     startTimer(60);
@@ -327,11 +482,9 @@
                 this.scene.add(this.pieceGroup);
                 this.scene.add(this.layerGroup);
 
-                // ★ 新增：3D 坐标指示器 (AxesHelper) ★
                 const offset = (size - 1) * this.SPACING / 2;
                 const axesLength = size * this.SPACING + 2;
                 const axesHelper = new THREE.AxesHelper(axesLength);
-                // 将原点移动到我们逻辑上的 (0,0,0) 位置，即左下后方
                 axesHelper.position.set(-offset, -offset, -offset);
                 this.scene.add(axesHelper);
 
@@ -381,7 +534,6 @@
                                     mat = new THREE.MeshStandardMaterial({ color: p===1?0x111111:0xffffff, roughness: 0.2, metalness: p===1?0.8:0.1 });
                                 }
                                 const mesh = new THREE.Mesh(geo, mat);
-                                // ★ 修改：Z轴映射纠正，z=0 在最底端 (-offset) ★
                                 mesh.position.set(x*this.SPACING - offset, (z*this.SPACING - offset), y*this.SPACING - offset);
                                 this.pieceGroup.add(mesh);
                             }
@@ -394,7 +546,6 @@
                     const geo = new THREE.RingGeometry(this.SPACING*0.5, this.SPACING*0.6, 32);
                     const mat = new THREE.MeshBasicMaterial({ color: 0xef4444, side: THREE.DoubleSide });
                     this.lastMoveRing = new THREE.Mesh(geo, mat);
-                    // ★ 同样修正高亮环的高度 ★
                     this.lastMoveRing.position.set(lastMove.x*this.SPACING - offset, (lastMove.z*this.SPACING - offset) + 0.05, lastMove.y*this.SPACING - offset);
                     this.lastMoveRing.rotation.x = Math.PI / 2;
                     this.scene.add(this.lastMoveRing);
@@ -408,7 +559,6 @@
                     new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.15, side: THREE.DoubleSide })
                 );
                 plane.rotation.x = Math.PI / 2;
-                // ★ 修改：Z轴平面位置反转修正 ★
                 plane.position.y = (z * this.SPACING - (size - 1) * this.SPACING / 2);
                 this.layerGroup.add(plane);
             }
