@@ -411,7 +411,7 @@ def add_snake_record(req: SnakeRecord):
 def get_snake_history(): return {"history": snake_records}
 
 
-# --- WebSocket 联机管理 (保持不变) ---
+# --- WebSocket 联机管理与观战/聊天系统 ---
 class ConnectionManager:
     def __init__(self):
         self.rooms = {}
@@ -424,8 +424,29 @@ class ConnectionManager:
                 board = Board3DNormal(10)
             else:
                 board = Board3DMelt(15)
-            self.rooms[room_id] = {"mode": mode, "board": board, "players": {}, "turn": 1}
+            # 新增 spectators 集合来存放观众
+            self.rooms[room_id] = {"mode": mode, "board": board, "players": {}, "spectators": set(), "turn": 1}
         return self.rooms[room_id]
+
+    async def broadcast(self, room_id: str, message: dict):
+        """核心广播函数：把消息同时发给房间里的玩家和观众"""
+        if room_id not in self.rooms: return
+        room = self.rooms[room_id]
+        payload = json.dumps(message)
+
+        # 广播给对局玩家
+        for ws in list(room["players"].keys()):
+            try:
+                await ws.send_text(payload)
+            except:
+                pass
+
+        # 广播给观众
+        for ws in list(room["spectators"]):
+            try:
+                await ws.send_text(payload)
+            except:
+                room["spectators"].remove(ws)
 
 
 manager = ConnectionManager()
@@ -435,43 +456,102 @@ manager = ConnectionManager()
 async def websocket_endpoint(websocket: WebSocket, room_id: str, mode: str):
     await websocket.accept()
     room = manager.get_or_create_room(room_id, mode)
-    if len(room["players"]) >= 2:
-        await websocket.send_text(json.dumps({"type": "error", "msg": "房间已满"}))
-        await websocket.close();
-        return
-    assigned_color = 1 if len(room["players"]) == 0 else -1
-    room["players"][websocket] = assigned_color
-    await websocket.send_text(
-        json.dumps({"type": "connected", "color": assigned_color, "msg": f"成功加入房间 {room_id}"}))
-    if len(room["players"]) == 2:
-        for ws in room["players"]:
-            await ws.send_text(
-                json.dumps({"type": "start", "msg": "对手已连接", "state": room["board"].grid, "turn": room["turn"]}))
+
+    # 身份分配逻辑：前两个进房间的是玩家 (1 和 -1)，后面的都是观众 (0)
+    if len(room["players"]) == 0:
+        assigned_color = 1
+        room["players"][websocket] = assigned_color
+        role_name = "黑方(先手)"
+    elif len(room["players"]) == 1:
+        assigned_color = -1
+        room["players"][websocket] = assigned_color
+        role_name = "白方(后手)"
+    else:
+        assigned_color = 0
+        room["spectators"].add(websocket)
+        role_name = "观战者"
+
+    await websocket.send_text(json.dumps({
+        "type": "connected",
+        "color": assigned_color,
+        "msg": f"成功加入房间 {room_id}，您的身份是：{role_name}"
+    }))
+
+    # 广播某人进入房间的消息
+    await manager.broadcast(room_id, {
+        "type": "chat_broadcast",
+        "sender": "系统",
+        "msg": f"[{role_name}] 进入了房间"
+    })
+
+    if len(room["players"]) == 2 and assigned_color != 0:
+        await manager.broadcast(room_id, {
+            "type": "start",
+            "msg": "双方已就绪，比赛开始！",
+            "state": room["board"].grid,
+            "turn": room["turn"]
+        })
+    elif assigned_color == 0:
+        # 观众一进来，立刻给他同步当前棋盘状态
+        await websocket.send_text(json.dumps({
+            "type": "update",
+            "state": room["board"].grid,
+            "scores": room["board"].scores,
+            "lastMove": room["board"].history[-1][2] if room["board"].history else None,
+            "turn": room["turn"],
+            "isWin": False, "winner": 0
+        }))
+
     try:
         while True:
             data = await websocket.receive_text()
             payload = json.loads(data)
-            if payload["action"] == "play":
-                if len(room["players"]) < 2: await websocket.send_text(
-                    json.dumps({"type": "info", "msg": "等待对手..."})); continue
+
+            # --- 聊天广播逻辑 ---
+            if payload["action"] == "chat":
+                # 确定发送者的身份
+                if websocket in room["players"]:
+                    sender_name = "黑方" if room["players"][websocket] == 1 else "白方"
+                else:
+                    sender_name = f"观众_{str(id(websocket))[-4:]}"
+
+                await manager.broadcast(room_id, {
+                    "type": "chat_broadcast",
+                    "sender": sender_name,
+                    "msg": payload["msg"]
+                })
+
+            # --- 落子逻辑 ---
+            elif payload["action"] == "play":
+                if assigned_color == 0: continue  # 观众不能下棋
+                if len(room["players"]) < 2:
+                    await websocket.send_text(json.dumps({"type": "info", "msg": "等待对手..."}))
+                    continue
                 if room["turn"] != assigned_color: continue
+
                 x, y, z = payload["x"], payload["y"], payload["z"]
                 b = room["board"]
                 if b.place_piece(x, y, z, assigned_color):
                     is_win = b.check_win(assigned_color)
                     if not is_win: room["turn"] = -assigned_color
-                    for ws in room["players"]:
-                        await ws.send_text(json.dumps({
-                            "type": "update", "state": b.grid, "scores": b.scores,
-                            "lastMove": {"x": x, "y": y, "z": z}, "turn": room["turn"],
-                            "isWin": is_win, "winner": assigned_color if is_win else 0
-                        }))
+
+                    # 状态更新广播给所有人
+                    await manager.broadcast(room_id, {
+                        "type": "update", "state": b.grid, "scores": b.scores,
+                        "lastMove": {"x": x, "y": y, "z": z}, "turn": room["turn"],
+                        "isWin": is_win, "winner": assigned_color if is_win else 0
+                    })
+
     except WebSocketDisconnect:
-        if websocket in room["players"]: del room["players"][websocket]
-        for ws_conn in list(room["players"].keys()):
-            try:
-                await ws_conn.send_text(json.dumps({"type": "opponent_left", "msg": "对手已断开"}))
-            except:
-                pass
-        if len(room["players"]) == 0:
+        # 离开房间的清理逻辑
+        if websocket in room["players"]:
+            del room["players"][websocket]
+            left_role = "黑方" if assigned_color == 1 else "白方"
+            await manager.broadcast(room_id, {"type": "opponent_left", "msg": f"{left_role} 逃跑了！对局强行终止。"})
+        elif websocket in room["spectators"]:
+            room["spectators"].remove(websocket)
+            await manager.broadcast(room_id,
+                                    {"type": "chat_broadcast", "sender": "系统", "msg": f"一位观战者离开了房间"})
+
+        if len(room["players"]) == 0 and len(room["spectators"]) == 0:
             if room_id in manager.rooms: del manager.rooms[room_id]
