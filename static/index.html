@@ -96,6 +96,9 @@
             <div class="flex items-center mb-6">
                 <div class="flex-1 h-px bg-slate-600"></div><span class="px-3 text-slate-400 text-sm">或者加入已有房间</span><div class="flex-1 h-px bg-slate-600"></div>
             </div>
+
+            <input type="text" id="userIdInput" placeholder="请输入你的游戏昵称 (必填)" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 mb-3 text-center text-xl text-yellow-400 outline-none focus:border-purple-500 transition">
+
             <input type="text" id="roomInput" placeholder="输入4位房间号" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 mb-4 text-center text-xl text-white outline-none focus:border-purple-500 transition" onkeypress="handleEnter(event)">
             <button onclick="joinRoom()" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold transition text-lg">加入房间</button>
             <button onclick="document.getElementById('roomModal').classList.add('hidden')" class="mt-6 w-full py-2 text-slate-400 hover:text-white transition">返回</button>
@@ -261,7 +264,6 @@
         let localState = null, lastMove = null;
 
         const API = {
-            // ★ 修改 init 调用，加入难度参数
             async init(m, d) { await fetch('/api/init', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode:m, difficulty:d}) }); },
             async play(x, y, z, p) { let res = await fetch('/api/play', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({x,y,z,player:p}) }); return await res.json(); },
             async aiPlay(p) { let res = await fetch('/api/ai_play', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({player:p}) }); return await res.json(); },
@@ -274,7 +276,6 @@
         function openRoomModal() { gameType = 'PVP'; document.getElementById('opponentModal').classList.add('hidden'); document.getElementById('roomModal').classList.remove('hidden'); }
         function openSnakeModal() { mode = 'SNAKE'; document.getElementById('snakeModal').classList.remove('hidden'); }
 
-        // ★ 新增：AI 难度选择控制 ★
         function setDifficulty(diff) {
             aiDifficulty = diff;
             const btnIds = ['diffEASY', 'diffMEDIUM', 'diffHARD'];
@@ -290,7 +291,6 @@
 
             document.getElementById('diff' + diff).className = `flex-1 py-2 rounded text-sm font-bold ${activeColorClass} text-white shadow-md transition`;
 
-            // 更新右上角的难度展示标签
             const tag = document.getElementById('diffDisplayTag');
             tag.innerText = diffText;
             tag.className = `hidden px-2 py-0.5 rounded text-xs font-bold ${activeColorClass.replace('600', '900/50')} text-white border border-white/20 ml-2`;
@@ -466,12 +466,19 @@
             document.getElementById('pauseBtn').classList.remove('hidden');
             document.getElementById('undoBtn').classList.remove('hidden');
             document.getElementById('roomInfoTop').classList.add('hidden');
-            // ★ 修改：向后端传递难度参数
+
             await API.init(mode, aiDifficulty);
             if (myColor === 1) startTimer(60); else startAIWait(1);
         }
 
+        // =======================================================
+        // ★ 修改：startGamePvP 加入昵称校验和结算事件拦截 ★
+        // =======================================================
         function startGamePvP(roomId) {
+            // ★ 新增：获取并校验昵称
+            const userId = document.getElementById('userIdInput').value.trim();
+            if (!userId) { alert("请先输入游戏昵称，用于记录天梯积分！"); return; }
+
             setupBaseUI();
             document.getElementById('pauseBtn').classList.add('hidden');
             document.getElementById('undoBtn').classList.add('hidden');
@@ -482,12 +489,12 @@
             document.getElementById('waitingOverlay').classList.remove('hidden');
             document.getElementById('roomDisplayCode').innerText = `房间号: ${roomId} (请发给对手)`;
 
-            // ★ 新增：进入联机模式时，显示聊天框并加上默认提示语
             document.getElementById('chatBox').classList.remove('hidden');
             document.getElementById('chatMessages').innerHTML = '<div class="text-slate-400 text-xs text-center my-2">欢迎来到联机大厅，请文明发言</div>';
 
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${protocol}//${window.location.host}/ws/pvp/${roomId}/${mode}`);
+            // ★ 修改：URL 末尾拼接上 userId，带给后端
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws/pvp/${roomId}/${mode}/${encodeURIComponent(userId)}`);
 
             ws.onerror = function() { alert("无法连接到游戏服务器！请确保 Python 后端正在运行。"); location.reload(); };
 
@@ -498,7 +505,31 @@
                     alert(data.msg); location.reload();
                 }
 
-                // ★ 新增：拦截并渲染后端发来的聊天广播
+                // ★ 新增：接收天梯结算通知并全服播报
+                else if (data.type === "elo_settlement") {
+                    const msgContainer = document.getElementById('chatMessages');
+
+                    // 在右下角的聊天大厅推送极具排面的战报
+                    msgContainer.innerHTML += `
+                        <div class="my-2 p-2 bg-yellow-900/50 border border-yellow-500/50 rounded text-center text-sm shadow-lg">
+                            <div class="text-yellow-400 font-bold mb-1">🏆 比赛结束 积分结算 🏆</div>
+                            <div class="text-emerald-400">胜者 ${data.winner_id} : +${data.w_delta} (现 ${data.new_w_elo} 分)</div>
+                            <div class="text-red-400">败者 ${data.loser_id} : ${data.l_delta} (现 ${data.new_l_elo} 分)</div>
+                        </div>`;
+                    msgContainer.scrollTop = msgContainer.scrollHeight;
+
+                    // 如果我是参赛玩家（而不是观众），弹出单独的提醒弹窗
+                    if (myColor !== 0) {
+                        let isWinner = (data.winner_id === userId);
+                        let myDelta = isWinner ? `+${data.w_delta}` : `${data.l_delta}`;
+                        let myNewElo = isWinner ? data.new_w_elo : data.new_l_elo;
+
+                        setTimeout(() => {
+                            alert(`【天梯排位结算】\n您本局的天梯积分变动：${myDelta}\n您当前的总天梯积分：${myNewElo}`);
+                        }, 500);
+                    }
+                }
+
                 else if (data.type === "chat_broadcast") {
                     const msgContainer = document.getElementById('chatMessages');
                     let colorClass = "text-slate-300";
@@ -507,13 +538,11 @@
                     else if (data.sender === "系统") colorClass = "text-yellow-400 text-xs";
 
                     msgContainer.innerHTML += `<div class="mb-1"><span class="${colorClass}">[${data.sender}]</span> <span class="text-slate-200">${data.msg}</span></div>`;
-                    msgContainer.scrollTop = msgContainer.scrollHeight; // 收到新消息自动滚动到底部
+                    msgContainer.scrollTop = msgContainer.scrollHeight;
                 }
 
                 else if (data.type === "connected") {
                     myColor = data.color;
-
-                    // ★ 新增：如果分配到的颜色是 0，说明是观战者。直接取消遮罩，修改顶部状态
                     if (myColor === 0) {
                         document.getElementById('statusText').innerText = "您正在观战";
                         document.getElementById('statusText').className = "text-sm font-bold text-purple-400";
@@ -537,14 +566,11 @@
 
                     if (data.isWin) {
                         isGameOver = true;
-
-                        // ★ 修改：游戏结束时，区分玩家和观战者的弹窗提示
                         if (myColor === 0) {
                             document.getElementById('statusText').innerText = `游戏结束！${data.winner === 1 ? '黑方' : '白方'}获胜`;
                         } else {
                             let winnerStr = data.winner === myColor ? "胜利！" : "失败...";
                             document.getElementById('statusText').innerText = `游戏结束！您${winnerStr}`;
-                            setTimeout(() => alert(data.winner === myColor ? "恭喜，您在联机对战中获胜！" : "很遗憾，您输给了对手。"), 200);
                         }
                     } else {
                         updatePvPStatus();
@@ -568,15 +594,12 @@
 
         async function onPlayerClick(x, y) {
             if (mode === 'SNAKE' || isGameOver || isPaused || currentTurn !== myColor) return;
-            // ★ 新增：如果是观众 (myColor === 0)，或者没轮到自己，直接无视点击
             if (myColor === 0) {
                 console.log("观战模式无法落子");
                 return;
             }
             if (currentTurn !== myColor) return;
 
-            if (gameType === 'PVP') ws.send(JSON.stringify({ action: "play", x: x, y: y, z: currentZ }));
-            // ... 下面保持原有单机 AI 代码不变 ...
             if (gameType === 'PVP') ws.send(JSON.stringify({ action: "play", x: x, y: y, z: currentZ }));
             else {
                 const res = await API.play(x, y, currentZ, myColor);

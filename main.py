@@ -6,6 +6,40 @@ import math
 import copy
 import random
 import json
+import os  # ★ 新增：用于判断本地数据库文件是否存在
+
+# ==========================================
+# ★ 新增：天梯积分系统 (Elo 算法与本地存储) ★
+# ==========================================
+DB_FILE = "users_db.json"
+
+
+def load_users():
+    """读取本地玩家数据库"""
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+
+def save_users(db):
+    """保存玩家数据到本地"""
+    with open(DB_FILE, 'w', encoding='utf-8') as f:
+        json.dump(db, f, ensure_ascii=False, indent=4)
+
+
+def calculate_elo(rating_winner, rating_loser):
+    """经典 Elo 积分算法 (K因子设为32)"""
+    K = 32
+    # 计算期望胜率
+    expected_winner = 1 / (1 + 10 ** ((rating_loser - rating_winner) / 400))
+    expected_loser = 1 / (1 + 10 ** ((rating_winner - rating_loser) / 400))
+
+    # 计算新积分 (赢家得分1，输家得分0)
+    new_winner = int(rating_winner + K * (1 - expected_winner))
+    new_loser = int(rating_loser + K * (0 - expected_loser))
+
+    return new_winner, new_loser
 
 
 # ==========================================
@@ -132,9 +166,11 @@ class Board3DMelt(Board3DNormal):
                                 if st in [1, -1]:
                                     chain.append((nx, ny, nz, st))
                                 else:
-                                    valid = False; break
+                                    valid = False;
+                                    break
                             else:
-                                valid = False; break
+                                valid = False;
+                                break
                         if valid and len(chain) == 5:
                             c_b = sum(1 for c in chain if c[3] == 1)
                             c_w = 5 - c_b
@@ -151,7 +187,7 @@ class Board3DMelt(Board3DNormal):
 
 
 # ==========================================
-# ★ 支持难度分级的智能 AI 大脑 ★
+# 支持难度分级的智能 AI 大脑
 # ==========================================
 class AI:
     def __init__(self, mode, size, difficulty="MEDIUM"):
@@ -172,21 +208,29 @@ class AI:
             nx, ny, nz = x + dx, y + dy, z + dz
             while 0 <= nx < self.size and 0 <= ny < self.size and 0 <= nz < self.size:
                 if board.grid[nz][ny][nx] == player:
-                    f_count += 1; nx += dx; ny += dy; nz += dz
+                    f_count += 1;
+                    nx += dx;
+                    ny += dy;
+                    nz += dz
                 elif board.grid[nz][ny][nx] == 0:
                     break
                 else:
-                    f_blocked = True; break
+                    f_blocked = True;
+                    break
             if not (0 <= nx < self.size and 0 <= ny < self.size and 0 <= nz < self.size): f_blocked = True
             b_count, b_blocked = 0, False
             nx, ny, nz = x - dx, y - dy, z - dz
             while 0 <= nx < self.size and 0 <= ny < self.size and 0 <= nz < self.size:
                 if board.grid[nz][ny][nx] == player:
-                    b_count += 1; nx -= dx; ny -= dy; nz -= dz
+                    b_count += 1;
+                    nx -= dx;
+                    ny -= dy;
+                    nz -= dz
                 elif board.grid[nz][ny][nx] == 0:
                     break
                 else:
-                    b_blocked = True; break
+                    b_blocked = True;
+                    break
             if not (0 <= nx < self.size and 0 <= ny < self.size and 0 <= nz < self.size): b_blocked = True
             total, blocks = 1 + f_count + b_count, (1 if f_blocked else 0) + (1 if b_blocked else 0)
             if total >= 5:
@@ -215,9 +259,11 @@ class AI:
                         if st in [1, -1, 0]:
                             window.append(st)
                         else:
-                            valid = False; break
+                            valid = False;
+                            break
                     else:
-                        valid = False; break
+                        valid = False;
+                        break
                 if valid and len(window) == 5:
                     c_ai, c_hu = window.count(player), window.count(hu_player)
                     if c_ai == 3 and c_hu == 1:
@@ -258,7 +304,7 @@ class AI:
                     total_score = ai_score + hu_score * 1.2
 
                 total_score += -((x - self.size // 2) ** 2 + (y - self.size // 2) ** 2 + (
-                            z - (0 if self.mode == '2D' else self.size // 2)) ** 2) * 0.1 + random.uniform(0, 2)
+                        z - (0 if self.mode == '2D' else self.size // 2)) ** 2) * 0.1 + random.uniform(0, 2)
                 scored_moves.append((total_score, (x, y, z)))
 
             elif self.mode == '3D_MELT':
@@ -344,7 +390,6 @@ game_session = {"board": None, "ai": None, "mode": "2D"}
 snake_records = []
 
 
-# ★ 更新 Request 接收难度参数
 class InitRequest(BaseModel): mode: str; difficulty: str
 
 
@@ -365,11 +410,14 @@ def serve_frontend(): return FileResponse("static/index.html")
 def init_game(req: InitRequest):
     game_session["mode"] = req.mode
     if req.mode == '2D':
-        game_session["board"] = Board2D(15); game_session["ai"] = AI(req.mode, 15, req.difficulty)
+        game_session["board"] = Board2D(15);
+        game_session["ai"] = AI(req.mode, 15, req.difficulty)
     elif req.mode == '3D_NORMAL':
-        game_session["board"] = Board3DNormal(10); game_session["ai"] = AI(req.mode, 10, req.difficulty)
+        game_session["board"] = Board3DNormal(10);
+        game_session["ai"] = AI(req.mode, 10, req.difficulty)
     elif req.mode == '3D_MELT':
-        game_session["board"] = Board3DMelt(15); game_session["ai"] = AI(req.mode, 15, req.difficulty)
+        game_session["board"] = Board3DMelt(15);
+        game_session["ai"] = AI(req.mode, 15, req.difficulty)
     return {"success": True}
 
 
@@ -398,7 +446,6 @@ def undo_move():
             "lastMove": b.history[-1][2] if b.history else None}
 
 
-# --- 贪吃蛇 API ---
 @app.post("/api/snake/record")
 def add_snake_record(req: SnakeRecord):
     snake_records.append({"speed": req.speed, "score": req.score})
@@ -411,7 +458,9 @@ def add_snake_record(req: SnakeRecord):
 def get_snake_history(): return {"history": snake_records}
 
 
-# --- WebSocket 联机管理与观战/聊天系统 ---
+# ==========================================
+# ★ 修改：WebSocket 联机管理与观战/天梯大厅 ★
+# ==========================================
 class ConnectionManager:
     def __init__(self):
         self.rooms = {}
@@ -424,24 +473,22 @@ class ConnectionManager:
                 board = Board3DNormal(10)
             else:
                 board = Board3DMelt(15)
-            # 新增 spectators 集合来存放观众
-            self.rooms[room_id] = {"mode": mode, "board": board, "players": {}, "spectators": set(), "turn": 1}
+            # ★ 新增 player_ids 字段，用于记录每个颜色对应的 user_id，以供天梯结算
+            self.rooms[room_id] = {"mode": mode, "board": board, "players": {}, "spectators": set(), "turn": 1,
+                                   "player_ids": {}}
         return self.rooms[room_id]
 
     async def broadcast(self, room_id: str, message: dict):
-        """核心广播函数：把消息同时发给房间里的玩家和观众"""
         if room_id not in self.rooms: return
         room = self.rooms[room_id]
         payload = json.dumps(message)
 
-        # 广播给对局玩家
         for ws in list(room["players"].keys()):
             try:
                 await ws.send_text(payload)
             except:
                 pass
 
-        # 广播给观众
         for ws in list(room["spectators"]):
             try:
                 await ws.send_text(payload)
@@ -452,36 +499,48 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-@app.websocket("/ws/pvp/{room_id}/{mode}")
-async def websocket_endpoint(websocket: WebSocket, room_id: str, mode: str):
+# ★ 修改：路由增加 {user_id} 参数
+@app.websocket("/ws/pvp/{room_id}/{mode}/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, room_id: str, mode: str, user_id: str):
     await websocket.accept()
+
+    # ★ 新增：初始化或读取该玩家的天梯积分
+    db = load_users()
+    if user_id not in db:
+        db[user_id] = 1500  # 新玩家初始 1500 分
+        save_users(db)
+    current_elo = db[user_id]
+
     room = manager.get_or_create_room(room_id, mode)
 
-    # 身份分配逻辑：前两个进房间的是玩家 (1 和 -1)，后面的都是观众 (0)
+    # 身份分配逻辑
     if len(room["players"]) == 0:
         assigned_color = 1
         room["players"][websocket] = assigned_color
-        role_name = "黑方(先手)"
+        room["player_ids"][assigned_color] = user_id  # 记录 user_id
+        role_name = f"黑方(先手) | {user_id}"
     elif len(room["players"]) == 1:
         assigned_color = -1
         room["players"][websocket] = assigned_color
-        role_name = "白方(后手)"
+        room["player_ids"][assigned_color] = user_id  # 记录 user_id
+        role_name = f"白方(后手) | {user_id}"
     else:
         assigned_color = 0
         room["spectators"].add(websocket)
-        role_name = "观战者"
+        role_name = f"观战者 | {user_id}"
 
+    # ★ 连入房间时告知玩家自己的当前积分
     await websocket.send_text(json.dumps({
         "type": "connected",
         "color": assigned_color,
-        "msg": f"成功加入房间 {room_id}，您的身份是：{role_name}"
+        "msg": f"成功加入房间 {room_id}，当前天梯积分: {current_elo}"
     }))
 
-    # 广播某人进入房间的消息
+    # 广播某人进入房间的消息 (带上积分)
     await manager.broadcast(room_id, {
         "type": "chat_broadcast",
         "sender": "系统",
-        "msg": f"[{role_name}] 进入了房间"
+        "msg": f"[{role_name}] 积分:{current_elo} 进入了房间"
     })
 
     if len(room["players"]) == 2 and assigned_color != 0:
@@ -492,7 +551,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, mode: str):
             "turn": room["turn"]
         })
     elif assigned_color == 0:
-        # 观众一进来，立刻给他同步当前棋盘状态
         await websocket.send_text(json.dumps({
             "type": "update",
             "state": room["board"].grid,
@@ -507,23 +565,17 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, mode: str):
             data = await websocket.receive_text()
             payload = json.loads(data)
 
-            # --- 聊天广播逻辑 ---
             if payload["action"] == "chat":
-                # 确定发送者的身份
-                if websocket in room["players"]:
-                    sender_name = "黑方" if room["players"][websocket] == 1 else "白方"
-                else:
-                    sender_name = f"观众_{str(id(websocket))[-4:]}"
-
+                # ★ 修改：发送聊天消息时带上 user_id
+                sender_name = user_id if assigned_color != 0 else f"观众_{user_id}"
                 await manager.broadcast(room_id, {
                     "type": "chat_broadcast",
                     "sender": sender_name,
                     "msg": payload["msg"]
                 })
 
-            # --- 落子逻辑 ---
             elif payload["action"] == "play":
-                if assigned_color == 0: continue  # 观众不能下棋
+                if assigned_color == 0: continue
                 if len(room["players"]) < 2:
                     await websocket.send_text(json.dumps({"type": "info", "msg": "等待对手..."}))
                     continue
@@ -535,23 +587,51 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, mode: str):
                     is_win = b.check_win(assigned_color)
                     if not is_win: room["turn"] = -assigned_color
 
-                    # 状态更新广播给所有人
+                    # 状态更新广播
                     await manager.broadcast(room_id, {
                         "type": "update", "state": b.grid, "scores": b.scores,
                         "lastMove": {"x": x, "y": y, "z": z}, "turn": room["turn"],
                         "isWin": is_win, "winner": assigned_color if is_win else 0
                     })
 
+                    # ==================================================
+                    # ★ 核心：胜负已分，结算天梯积分并全大厅广播
+                    # ==================================================
+                    if is_win:
+                        winner_id = room["player_ids"][assigned_color]
+                        loser_id = room["player_ids"][-assigned_color]
+
+                        db = load_users()
+                        old_w_elo, old_l_elo = db[winner_id], db[loser_id]
+
+                        # 计算新积分
+                        new_w_elo, new_l_elo = calculate_elo(old_w_elo, old_l_elo)
+
+                        # 存入本地数据库文件
+                        db[winner_id] = new_w_elo
+                        db[loser_id] = new_l_elo
+                        save_users(db)
+
+                        # 向房间内所有人广播积分战报
+                        await manager.broadcast(room_id, {
+                            "type": "elo_settlement",
+                            "winner_id": winner_id,
+                            "loser_id": loser_id,
+                            "w_delta": new_w_elo - old_w_elo,
+                            "l_delta": new_l_elo - old_l_elo,
+                            "new_w_elo": new_w_elo,
+                            "new_l_elo": new_l_elo
+                        })
+
     except WebSocketDisconnect:
         # 离开房间的清理逻辑
         if websocket in room["players"]:
             del room["players"][websocket]
-            left_role = "黑方" if assigned_color == 1 else "白方"
-            await manager.broadcast(room_id, {"type": "opponent_left", "msg": f"{left_role} 逃跑了！对局强行终止。"})
+            await manager.broadcast(room_id, {"type": "opponent_left", "msg": f"玩家 {user_id} 逃跑了！对局强行终止。"})
         elif websocket in room["spectators"]:
             room["spectators"].remove(websocket)
             await manager.broadcast(room_id,
-                                    {"type": "chat_broadcast", "sender": "系统", "msg": f"一位观战者离开了房间"})
+                                    {"type": "chat_broadcast", "sender": "系统", "msg": f"观战者 {user_id} 离开了房间"})
 
         if len(room["players"]) == 0 and len(room["spectators"]) == 0:
             if room_id in manager.rooms: del manager.rooms[room_id]
