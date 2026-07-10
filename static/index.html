@@ -17,6 +17,7 @@
         input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 4px; background: rgba(255,255,255,0.2); }
         .piece-black { background: radial-gradient(circle at 30% 30%, #4b5563, #000000); box-shadow: 2px 2px 5px rgba(0,0,0,0.5); }
         .piece-white { background: radial-gradient(circle at 30% 30%, #ffffff, #9ca3af); box-shadow: 2px 2px 5px rgba(0,0,0,0.5); }
+        .piece-green { background: radial-gradient(circle at 30% 30%, #4ade80, #064e3b); box-shadow: 2px 2px 5px rgba(0,0,0,0.5); }
         .piece-rock { background: linear-gradient(135deg, #6b7280, #374151); }
         .highlight-last { border: 2px solid #ef4444; box-shadow: 0 0 12px #ef4444; }
     </style>
@@ -106,18 +107,29 @@
     </div>
 
     <div id="snakeModal" class="hidden absolute inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur">
-        <div class="glass p-8 rounded-2xl w-96 border border-white/20 shadow-2xl text-center">
-            <h2 class="text-2xl font-bold mb-6 text-yellow-400">贪吃蛇挑战模式</h2>
-            <div class="mb-8">
+        <div class="glass p-8 rounded-2xl w-[480px] border border-white/20 shadow-2xl text-center">
+            <h2 class="text-2xl font-bold mb-4 text-yellow-400">贪吃蛇模式选择</h2>
+
+            <div class="mb-6 bg-slate-800/80 p-4 rounded-xl text-left text-sm text-slate-300 space-y-3 border border-slate-600">
+                <p><span class="text-emerald-400 font-bold">🟢 单机休闲：</span>吃白子，撞墙或自己则结束。</p>
+                <p><span class="text-purple-400 font-bold">⚔️ 大战 AI：</span>15x20 大棋盘，<strong class="text-red-400">限时60秒</strong>抢夺绿子。按住 <kbd class="bg-slate-700 px-1.5 py-0.5 rounded text-white shadow font-mono text-xs">Shift</kbd> 消耗身体加速。头碰头短者亡，死后清空分数复活！</p>
+            </div>
+
+            <div class="mb-6">
                 <div class="flex justify-between text-sm font-bold text-slate-300 mb-2">
                     <span>1 档 (最慢)</span>
-                    <span id="speedLabel" class="text-yellow-400">速度: 3 档</span>
+                    <span id="speedLabel" class="text-yellow-400">单机速度: 3 档</span>
                     <span>5 档 (最快)</span>
                 </div>
-                <input type="range" id="speedSlider" min="1" max="5" value="3" oninput="document.getElementById('speedLabel').innerText='速度: '+this.value+' 档'">
+                <input type="range" id="speedSlider" min="1" max="5" value="3" oninput="document.getElementById('speedLabel').innerText='单机速度: '+this.value+' 档'">
             </div>
-            <button onclick="startSnakeGame()" class="w-full bg-yellow-600 hover:bg-yellow-500 py-4 rounded-xl font-bold text-lg mb-4 shadow-[0_0_15px_rgba(202,138,4,0.5)]">开始挑战</button>
-            <button onclick="showSnakeHistory()" class="w-full bg-slate-700 hover:bg-slate-600 py-3 rounded-xl font-bold text-white transition mb-6">查看历史排行榜</button>
+
+            <div class="flex justify-between space-x-4 mb-5">
+                <button onclick="startSnakeGame('SINGLE')" class="flex-1 bg-emerald-600 hover:bg-emerald-500 py-3 rounded-xl font-bold text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] transition">单机挑战</button>
+                <button onclick="startSnakeGame('AI')" class="flex-1 bg-purple-600 hover:bg-purple-500 py-3 rounded-xl font-bold text-white shadow-[0_0_15px_rgba(147,51,234,0.4)] transition">大战 AI (PvE)</button>
+            </div>
+
+            <button onclick="showSnakeHistory()" class="w-full bg-slate-700 hover:bg-slate-600 py-3 rounded-xl font-bold text-white transition mb-4">查看单机历史排行榜</button>
             <button onclick="document.getElementById('snakeModal').classList.add('hidden')" class="w-full py-2 text-slate-400 hover:text-white transition">返回主菜单</button>
         </div>
     </div>
@@ -336,12 +348,16 @@
 
             if (mode === 'SNAKE') {
                 document.getElementById('modeTitle').innerText = '[挑战] 贪吃蛇模式';
-                document.getElementById('title2D').innerText = '操控黑子(蛇) 吃掉白子(食物)';
+                document.getElementById('title2D').innerText = '操控黑子吃掉目标';
                 document.getElementById('zControl').classList.add('hidden');
                 document.getElementById('canvas3d').classList.add('hidden');
                 document.getElementById('panel2D').classList.replace('w-[450px]', 'w-full');
                 document.getElementById('undoBtn').classList.add('hidden');
-                document.getElementById('timerText').classList.add('hidden');
+
+                // ★ 贪吃蛇模式下放开 timerText 以供60秒倒计时使用
+                document.getElementById('timerText').classList.remove('hidden');
+                document.getElementById('timerText').innerText = "60s";
+
                 document.getElementById('diffDisplayTag').classList.add('hidden');
                 gridContainer.classList.add('items-center');
                 gridContainer.classList.remove('items-start', 'pt-16');
@@ -383,81 +399,420 @@
             if (mode !== '2D') Render3D.sync(localState);
         }
 
+        // =======================================================
+        // ★ 核心升级：带有 60s 定时与超强 AI 的贪吃蛇引擎 ★
+        // =======================================================
         const SnakeEngine = {
-            timer: null, speedLevel: 1, speedMs: 500, score: 0,
-            snake: [], food: null, dir: {x: 1, y: 0}, nextDir: {x: 1, y: 0},
-            isPaused: false, isPlaying: false,
+            timer: null,
+            gameTimer: null, // 60秒限时定时器
+            timeLeft: 60,
+            mode: 'SINGLE', // 'SINGLE' 或 'AI'
+            cols: 15, rows: 15,
+            tickRate: 50, // 50ms 帧刷新
+            tickCount: 0,
+            food: null,
+            isPaused: false,
+            isPlaying: false,
+            speedLevel: 3,
 
-            start(speed) {
-                this.speedLevel = parseInt(speed); this.speedMs = 600 - this.speedLevel * 100;
-                this.score = 0; this.snake = [{x: 7, y: 7}, {x: 6, y: 7}, {x: 5, y: 7}];
-                this.dir = {x: 1, y: 0}; this.nextDir = {x: 1, y: 0};
-                this.isPaused = false; this.isPlaying = true;
-                this.spawnFood(); this.updateUI();
-                document.addEventListener('keydown', this.handleKey); this.resume();
+            player: null,
+            ai: null,
+
+            initSnake(type) {
+                return {
+                    type: type,
+                    body: type === 'PLAYER' ? [{x:7, y:5}, {x:6, y:5}, {x:5, y:5}] : [{x:7, y:15}, {x:8, y:15}, {x:9, y:15}],
+                    dir: type === 'PLAYER' ? {x:1, y:0} : {x:-1, y:0},
+                    nextDir: type === 'PLAYER' ? {x:1, y:0} : {x:-1, y:0},
+                    score: 0,
+                    baseSpeed: 5, // 250ms 走一步
+                    fastSpeed: 2, // 100ms 走一步
+                    moveCounter: 0,
+                    isAccelerating: false,
+                    accelCostCounter: 0,
+                    invincibleTicks: (type === 'AI' || this.mode === 'AI') ? 60 : 0, // 初始 3秒 无敌
+                    isDead: false
+                };
             },
+
+            start(mode, speed) {
+                this.mode = mode;
+                this.cols = 15;
+                // ★ 严格修正：宽15，长20
+                this.rows = mode === 'AI' ? 20 : 15;
+                this.tickCount = 0;
+                this.speedLevel = parseInt(speed);
+
+                this.player = this.initSnake('PLAYER');
+                if (mode === 'SINGLE') {
+                    this.player.baseSpeed = 8 - this.speedLevel;
+                    this.player.invincibleTicks = 0;
+                }
+
+                this.ai = mode === 'AI' ? this.initSnake('AI') : null;
+
+                this.isPaused = false;
+                this.isPlaying = true;
+                this.spawnFood();
+                this.updateUI();
+
+                document.removeEventListener('keydown', this.handleKeyDown);
+                document.removeEventListener('keyup', this.handleKeyUp);
+                document.addEventListener('keydown', this.handleKeyDown);
+                document.addEventListener('keyup', this.handleKeyUp);
+
+                if (this.timer) clearInterval(this.timer);
+                if (this.gameTimer) clearInterval(this.gameTimer);
+
+                this.timer = setInterval(() => this.loop(), this.tickRate);
+
+                // ★ 倒计时 60 秒逻辑
+                if (mode === 'AI') {
+                    this.timeLeft = 60;
+                    document.getElementById('timerText').innerText = `${this.timeLeft}s`;
+                    this.gameTimer = setInterval(() => {
+                        if(this.isPaused || !this.isPlaying) return;
+                        this.timeLeft--;
+                        document.getElementById('timerText').innerText = `${this.timeLeft}s`;
+                        if(this.timeLeft <= 0) this.timeUp();
+                    }, 1000);
+                } else {
+                    document.getElementById('timerText').classList.add('hidden');
+                }
+            },
+
+            timeUp() {
+                this.stop();
+                let msg = "时间到！\n";
+                if (this.player.score > this.ai.score) msg += "恭喜你，在限时内战胜了 AI！";
+                else if (this.player.score < this.ai.score) msg += "很遗憾，AI 取得了胜利。";
+                else msg += "势均力敌，平局！";
+
+                setTimeout(() => {
+                    alert(`${msg}\n最终得分 - 玩家(黑): ${this.player.score} | AI(白): ${this.ai.score}`);
+                    location.reload();
+                }, 100);
+            },
+
             spawnFood() {
                 let emptySpaces = [];
-                for(let y=0; y<15; y++) for(let x=0; x<15; x++) if(!this.snake.some(s => s.x === x && s.y === y)) emptySpaces.push({x, y});
-                if(emptySpaces.length > 0) this.food = emptySpaces[Math.floor(Math.random() * emptySpaces.length)];
+                for (let y = 0; y < this.rows; y++) {
+                    for (let x = 0; x < this.cols; x++) {
+                        let isPlayer = this.player.body.some(s => s.x === x && s.y === y);
+                        let isAI = this.ai && this.ai.body.some(s => s.x === x && s.y === y);
+                        if (!isPlayer && !isAI) emptySpaces.push({x, y});
+                    }
+                }
+                if (emptySpaces.length > 0) this.food = emptySpaces[Math.floor(Math.random() * emptySpaces.length)];
             },
-            handleKey(e) {
-                if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
-                if(SnakeEngine.isPaused || !SnakeEngine.isPlaying) return;
-                const d = SnakeEngine.dir;
-                if (e.key === 'ArrowUp' && d.y !== 1) SnakeEngine.nextDir = {x: 0, y: -1};
-                if (e.key === 'ArrowDown' && d.y !== -1) SnakeEngine.nextDir = {x: 0, y: 1};
-                if (e.key === 'ArrowLeft' && d.x !== 1) SnakeEngine.nextDir = {x: -1, y: 0};
-                if (e.key === 'ArrowRight' && d.x !== -1) SnakeEngine.nextDir = {x: 1, y: 0};
+
+            handleKeyDown(e) {
+                if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Shift'].includes(e.key)) e.preventDefault();
+                if (!SnakeEngine.isPlaying || SnakeEngine.isPaused) return;
+
+                if (e.key === 'Shift' && SnakeEngine.mode === 'AI') SnakeEngine.player.isAccelerating = true;
+
+                const p = SnakeEngine.player;
+                if (e.key === 'ArrowUp' && p.dir.y !== 1) p.nextDir = {x: 0, y: -1};
+                if (e.key === 'ArrowDown' && p.dir.y !== -1) p.nextDir = {x: 0, y: 1};
+                if (e.key === 'ArrowLeft' && p.dir.x !== 1) p.nextDir = {x: -1, y: 0};
+                if (e.key === 'ArrowRight' && p.dir.x !== -1) p.nextDir = {x: 1, y: 0};
             },
-            update() {
-                this.dir = this.nextDir;
-                const head = this.snake[0]; const nx = head.x + this.dir.x, ny = head.y + this.dir.y;
-                if (nx < 0 || nx >= 15 || ny < 0 || ny >= 15) return this.gameOver("撞到边界了！");
-                if (this.snake.some(s => s.x === nx && s.y === ny)) return this.gameOver("咬到自己了！");
-                this.snake.unshift({x: nx, y: ny});
-                if (nx === this.food.x && ny === this.food.y) { this.score += 100; this.updateUI(); this.spawnFood(); }
-                else { this.snake.pop(); }
-                this.render();
+
+            handleKeyUp(e) {
+                if (e.key === 'Shift' && SnakeEngine.mode === 'AI') SnakeEngine.player.isAccelerating = false;
             },
+
+            loop() {
+                if (this.isPaused || !this.isPlaying) return;
+                this.tickCount++;
+
+                let playerMoved = this.processSnakeMovement(this.player);
+                let aiMoved = false;
+
+                if (this.mode === 'AI') {
+                    this.aiComputeDir(); // 调用 AI 高级寻路算法
+                    aiMoved = this.processSnakeMovement(this.ai);
+                }
+
+                if (playerMoved || aiMoved) {
+                    this.checkCollisions();
+                    this.render();
+                }
+            },
+
+            // ★ 究极加强：会追杀、会逃跑、会自动加速、防自杀的 AI
+            aiComputeDir() {
+                const a = this.ai; const p = this.player;
+                if (!a || a.isDead) return;
+
+                const head = a.body[0];
+                const possibleDirs = [{x: 1, y: 0}, {x: -1, y: 0}, {x: 0, y: 1}, {x: 0, y: -1}];
+                const validDirs = possibleDirs.filter(d => !(d.x === -a.dir.x && d.y === -a.dir.y));
+
+                let isWall = (x, y) => x < 0 || x >= this.cols || y < 0 || y >= this.rows;
+                let isOwnBody = (x, y) => a.body.some(s => s.x === x && s.y === y);
+                let isPlayerBody = (x, y) => p.body.some(s => s.x === x && s.y === y);
+
+                // 判断猎杀与逃跑优先级
+                let huntPlayer = (a.invincibleTicks > 0 && p.invincibleTicks === 0) || (a.body.length > p.body.length && p.invincibleTicks === 0);
+                let fleePlayer = (p.invincibleTicks > 0 && a.invincibleTicks === 0) || (p.body.length > a.body.length && a.invincibleTicks === 0);
+
+                let target = this.food;
+                // 如果决定猎杀，预判玩家头部的下一步走向
+                if (huntPlayer && !p.isDead) target = { x: p.body[0].x + p.dir.x, y: p.body[0].y + p.dir.y };
+
+                let bestScore = -Infinity;
+                let bestDir = validDirs[0];
+
+                for (let d of validDirs) {
+                    let nx = head.x + d.x; let ny = head.y + d.y;
+
+                    if (isWall(nx, ny) || isOwnBody(nx, ny)) continue; // 绝对死路
+                    if (isPlayerBody(nx, ny) && a.invincibleTicks === 0) continue; // 撞玩家身体必死
+
+                    let score = 0;
+
+                    // 1. 曼哈顿距离引导
+                    let distToTarget = Math.abs(nx - target.x) + Math.abs(ny - target.y);
+                    score -= distToTarget * 10;
+
+                    // 2. 逃跑规避算法
+                    if (fleePlayer && !p.isDead) {
+                        let distToPlayerHead = Math.abs(nx - p.body[0].x) + Math.abs(ny - p.body[0].y);
+                        score += distToPlayerHead * 20; // 越远越好
+                        if (distToPlayerHead <= 2) score -= 1000; // 极度危险禁区
+                    }
+
+                    // 3. 简单的未来空间探测（防钻死胡同）
+                    let freeSpaces = 0;
+                    for (let d2 of possibleDirs) {
+                        let nnx = nx + d2.x, nny = ny + d2.y;
+                        if (!isWall(nnx, nny) && !isOwnBody(nnx, nny) && !(isPlayerBody(nnx, nny) && a.invincibleTicks === 0)) freeSpaces++;
+                    }
+                    score += freeSpaces * 5;
+
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestDir = d;
+                    }
+                }
+
+                a.nextDir = bestDir;
+
+                // ★ AI 智能判定是否需要消耗分数开启 Shift 加速
+                let shouldAccelerate = false;
+                if (a.body.length > 5 && !p.isDead) {
+                    let distToFood = Math.abs(head.x - this.food.x) + Math.abs(head.y - this.food.y);
+                    let playerDistToFood = Math.abs(p.body[0].x - this.food.x) + Math.abs(p.body[0].y - this.food.y);
+                    let distToPlayerHead = Math.abs(head.x - p.body[0].x) + Math.abs(head.y - p.body[0].y);
+
+                    if (huntPlayer && distToPlayerHead < 8) shouldAccelerate = true; // 发现猎物，冲刺追杀
+                    else if (fleePlayer && distToPlayerHead < 5) shouldAccelerate = true; // 被近身，冲刺逃逸
+                    else if (!huntPlayer && !fleePlayer && playerDistToFood < distToFood && distToFood < 10) shouldAccelerate = true; // 玩家离食物更近，燃烧身体抢食物
+                }
+                a.isAccelerating = shouldAccelerate;
+            },
+
+            processSnakeMovement(snake) {
+                if (snake.isDead) return false;
+                if (snake.invincibleTicks > 0) snake.invincibleTicks--;
+
+                let canAccelerate = snake.isAccelerating && snake.body.length > 3;
+                let currentSpeed = canAccelerate ? snake.fastSpeed : snake.baseSpeed;
+
+                snake.moveCounter++;
+                if (snake.moveCounter >= currentSpeed) {
+                    snake.moveCounter = 0;
+
+                    snake.dir = snake.nextDir;
+                    const head = snake.body[0];
+                    const nx = head.x + snake.dir.x;
+                    const ny = head.y + snake.dir.y;
+
+                    snake.body.unshift({x: nx, y: ny});
+
+                    // 加速扣分惩罚
+                    if (canAccelerate) {
+                        snake.accelCostCounter++;
+                        if (snake.accelCostCounter >= 3) {
+                            snake.accelCostCounter = 0;
+                            snake.body.pop();
+                            snake.score = Math.max(0, snake.score - 100);
+                            this.updateUI();
+                        }
+                    }
+
+                    if (nx === this.food.x && ny === this.food.y) {
+                        snake.score += 100;
+                        this.spawnFood();
+                        this.updateUI();
+                    } else {
+                        snake.body.pop();
+                    }
+                    return true;
+                }
+                return false;
+            },
+
+            checkCollisions() {
+                const p = this.player; const a = this.ai;
+
+                this.checkWallAndSelf(p);
+                if (this.mode === 'AI') this.checkWallAndSelf(a);
+
+                if (this.mode === 'AI' && !p.isDead && !a.isDead && p.invincibleTicks === 0 && a.invincibleTicks === 0) {
+                    const pHead = p.body[0]; const aHead = a.body[0];
+
+                    if (pHead.x === aHead.x && pHead.y === aHead.y) {
+                        if (p.body.length > a.body.length) a.isDead = true;
+                        else if (a.body.length > p.body.length) p.isDead = true;
+                        else { p.isDead = true; a.isDead = true; }
+                    } else {
+                        let pHitsA = a.body.some((s, idx) => idx > 0 && s.x === pHead.x && s.y === pHead.y);
+                        let aHitsP = p.body.some((s, idx) => idx > 0 && s.x === aHead.x && s.y === aHead.y);
+
+                        if (pHitsA && aHitsP) { p.isDead = true; a.isDead = true; }
+                        else if (pHitsA) p.isDead = true;
+                        else if (aHitsP) a.isDead = true;
+                    }
+                }
+
+                if (p.isDead) this.handleDeath(p);
+                if (a && a.isDead) this.handleDeath(a);
+            },
+
+            checkWallAndSelf(snake) {
+                if (snake.isDead) return;
+                const head = snake.body[0];
+                if (head.x < 0 || head.x >= this.cols || head.y < 0 || head.y >= this.rows) {
+                    snake.isDead = true;
+                } else {
+                    for (let i = 1; i < snake.body.length; i++) {
+                        if (head.x === snake.body[i].x && head.y === snake.body[i].y) {
+                            snake.isDead = true; break;
+                        }
+                    }
+                }
+            },
+
+            handleDeath(snake) {
+                if (this.mode === 'SINGLE') {
+                    this.gameOver("撞到边界或自己了！");
+                } else {
+                    snake.isDead = false;
+                    snake.score = 0;
+
+                    let spawned = false;
+                    while (!spawned) {
+                        let rx = Math.floor(Math.random() * (this.cols - 6)) + 3;
+                        let ry = Math.floor(Math.random() * (this.rows - 6)) + 3;
+
+                        let other = snake.type === 'PLAYER' ? this.ai : this.player;
+                        let safe = true;
+                        if (other && !other.isDead) {
+                            let dist = Math.abs(rx - other.body[0].x) + Math.abs(ry - other.body[0].y);
+                            if (dist < 6) safe = false;
+                        }
+                        if (safe) {
+                            snake.body = [{x:rx, y:ry}, {x:rx-1, y:ry}, {x:rx-2, y:ry}];
+                            snake.dir = {x:1, y:0}; snake.nextDir = {x:1, y:0};
+                            snake.invincibleTicks = 60;
+                            snake.isAccelerating = false;
+                            spawned = true;
+                        }
+                    }
+                    this.updateUI();
+                }
+            },
+
             render() {
-                const grid = document.getElementById('grid2d'); grid.innerHTML = '';
-                grid.style.gridTemplateColumns = `repeat(15, minmax(0, 1fr))`; grid.style.width = '600px'; grid.style.height = '600px';
-                for (let y = 0; y < 15; y++) {
-                    for (let x = 0; x < 15; x++) {
-                        const cell = document.createElement('div'); cell.className = 'grid-cell w-full aspect-square border border-white/10 flex items-center justify-center';
-                        const isHead = this.snake[0].x === x && this.snake[0].y === y;
-                        const isBody = this.snake.some(s => s.x === x && s.y === y);
-                        const isFood = this.food && this.food.x === x && this.food.y === y;
-                        if (isHead) {
-                            const pDiv = document.createElement('div'); pDiv.className = 'w-[85%] h-[85%] rounded-full piece-black highlight-last'; cell.appendChild(pDiv);
-                        } else if (isBody) {
-                            const pDiv = document.createElement('div'); pDiv.className = 'w-[85%] h-[85%] rounded-full piece-black'; cell.appendChild(pDiv);
-                        } else if (isFood) {
-                            const pDiv = document.createElement('div'); pDiv.className = 'w-[85%] h-[85%] rounded-full piece-white shadow-[0_0_15px_rgba(255,255,255,0.8)]'; cell.appendChild(pDiv);
+                const grid = document.getElementById('grid2d');
+                grid.innerHTML = '';
+                grid.style.gridTemplateColumns = `repeat(${this.cols}, minmax(0, 1fr))`;
+
+                // ★ 严格控制 CSS 画布尺寸，宽始终450px(15格*30)，高在AI模式下为600px(20格*30)
+                grid.style.width = '450px';
+                grid.style.height = this.mode === 'AI' ? '600px' : '450px';
+
+                for (let y = 0; y < this.rows; y++) {
+                    for (let x = 0; x < this.cols; x++) {
+                        const cell = document.createElement('div');
+                        cell.className = 'grid-cell w-full aspect-square border border-white/10 flex items-center justify-center';
+
+                        let pieceClass = '';
+                        let isHighlight = false;
+                        let isInvincible = false;
+
+                        if (this.food && this.food.x === x && this.food.y === y) {
+                            pieceClass = this.mode === 'AI' ? 'piece-green' : 'piece-white';
+                            isHighlight = true;
+                        }
+
+                        let pIdx = this.player.body.findIndex(s => s.x === x && s.y === y);
+                        if (pIdx !== -1) {
+                            pieceClass = 'piece-black';
+                            if (pIdx === 0) isHighlight = true;
+                            if (this.player.invincibleTicks > 0) isInvincible = true;
+                        }
+
+                        if (this.mode === 'AI' && this.ai) {
+                            let aIdx = this.ai.body.findIndex(s => s.x === x && s.y === y);
+                            if (aIdx !== -1) {
+                                pieceClass = 'piece-white';
+                                if (aIdx === 0) isHighlight = true;
+                                if (this.ai.invincibleTicks > 0) isInvincible = true;
+                            }
+                        }
+
+                        if (pieceClass) {
+                            const pDiv = document.createElement('div');
+                            pDiv.className = `w-[85%] h-[85%] rounded-full ${pieceClass} ${isHighlight ? 'highlight-last' : ''}`;
+
+                            if (isInvincible) pDiv.style.opacity = (this.tickCount % 10 < 5) ? '0.3' : '1';
+
+                            if (pieceClass === 'piece-green') pDiv.style.boxShadow = '0 0 15px rgba(74,222,128,0.8)';
+                            else if (pieceClass === 'piece-white' && this.mode === 'SINGLE') pDiv.style.boxShadow = '0 0 15px rgba(255,255,255,0.8)';
+
+                            cell.appendChild(pDiv);
                         }
                         grid.appendChild(cell);
                     }
                 }
             },
-            pause() { this.isPaused = true; clearInterval(this.timer); },
-            resume() { this.isPaused = false; this.timer = setInterval(() => this.update(), this.speedMs); },
-            stop() { this.pause(); this.isPlaying = false; document.removeEventListener('keydown', this.handleKey); },
+
+            pause() { this.isPaused = true; },
+            resume() { this.isPaused = false; },
+            stop() {
+                this.isPlaying = false;
+                clearInterval(this.timer);
+                if (this.gameTimer) clearInterval(this.gameTimer);
+            },
+
             async gameOver(reason) {
                 this.stop();
-                await fetch('/api/snake/record', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({speed: this.speedLevel, score: this.score}) });
-                alert(`贪吃蛇游戏结束！\n原因: ${reason}\n难度: ${this.speedLevel} 档\n最终得分: ${this.score} 分`);
-                showSnakeHistory();
+                if (this.mode === 'SINGLE') {
+                    await fetch('/api/snake/record', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({speed: this.speedLevel, score: this.player.score}) });
+                    alert(`贪吃蛇游戏结束！\n原因: ${reason}\n难度: ${this.speedLevel} 档\n最终得分: ${this.player.score} 分`);
+                    showSnakeHistory();
+                }
             },
+
             updateUI() {
-                document.getElementById('statusText').innerText = `得分: ${this.score} (速度 ${this.speedLevel} 档)`;
+                if (this.mode === 'SINGLE') {
+                    document.getElementById('statusText').innerText = `得分: ${this.player.score} (速度 ${this.speedLevel} 档)`;
+                } else {
+                    document.getElementById('statusText').innerText = `玩家(黑): ${this.player.score} 分  |  AI(白): ${this.ai.score} 分`;
+                }
                 document.getElementById('statusText').className = "text-lg font-bold text-yellow-400";
             }
         };
 
-        function startSnakeGame() {
+        function startSnakeGame(mode) {
             const speed = document.getElementById('speedSlider').value;
-            setupBaseUI(); document.getElementById('pauseBtn').classList.remove('hidden'); SnakeEngine.start(speed);
+            setupBaseUI();
+            document.getElementById('pauseBtn').classList.remove('hidden');
+            SnakeEngine.start(mode, speed);
         }
 
         async function startGameAI(color) {
@@ -471,11 +826,7 @@
             if (myColor === 1) startTimer(60); else startAIWait(1);
         }
 
-        // =======================================================
-        // ★ 修改：startGamePvP 加入昵称校验和结算事件拦截 ★
-        // =======================================================
         function startGamePvP(roomId) {
-            // ★ 新增：获取并校验昵称
             const userId = document.getElementById('userIdInput').value.trim();
             if (!userId) { alert("请先输入游戏昵称，用于记录天梯积分！"); return; }
 
@@ -493,7 +844,6 @@
             document.getElementById('chatMessages').innerHTML = '<div class="text-slate-400 text-xs text-center my-2">欢迎来到联机大厅，请文明发言</div>';
 
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            // ★ 修改：URL 末尾拼接上 userId，带给后端
             ws = new WebSocket(`${protocol}//${window.location.host}/ws/pvp/${roomId}/${mode}/${encodeURIComponent(userId)}`);
 
             ws.onerror = function() { alert("无法连接到游戏服务器！请确保 Python 后端正在运行。"); location.reload(); };
@@ -505,11 +855,9 @@
                     alert(data.msg); location.reload();
                 }
 
-                // ★ 新增：接收天梯结算通知并全服播报
                 else if (data.type === "elo_settlement") {
                     const msgContainer = document.getElementById('chatMessages');
 
-                    // 在右下角的聊天大厅推送极具排面的战报
                     msgContainer.innerHTML += `
                         <div class="my-2 p-2 bg-yellow-900/50 border border-yellow-500/50 rounded text-center text-sm shadow-lg">
                             <div class="text-yellow-400 font-bold mb-1">🏆 比赛结束 积分结算 🏆</div>
@@ -518,7 +866,6 @@
                         </div>`;
                     msgContainer.scrollTop = msgContainer.scrollHeight;
 
-                    // 如果我是参赛玩家（而不是观众），弹出单独的提醒弹窗
                     if (myColor !== 0) {
                         let isWinner = (data.winner_id === userId);
                         let myDelta = isWinner ? `+${data.w_delta}` : `${data.l_delta}`;
